@@ -1,11 +1,83 @@
 name: CI Failure Bot Demo
 
 on:
+  workflow_run:
+    workflows: ["Demo CI Failure"]
+    types:
+      - completed
   workflow_dispatch:
 
 jobs:
-  test:
+  ci-failure-bot:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
+
     steps:
-      - name: Test
-        run: echo "Bot workflow works!"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests PyGithub google-generativeai
+
+      - name: Run CI Failure Bot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '12345' }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || '1' }}
+        run: |
+          cat > bot.py << 'EOF'
+          import os
+          import sys
+          import json
+          import google.generativeai as genai
+          from github import Github
+
+          # Simple demo bot
+          github_token = os.environ.get("GITHUB_TOKEN")
+          gemini_api_key = os.environ.get("GEMINI_API_KEY")
+          pr_number = os.environ.get("PR_NUMBER", "1")
+          repository_name = os.environ.get("REPOSITORY")
+
+          if not all([github_token, gemini_api_key, repository_name]):
+              print("Missing required environment variables")
+              sys.exit(1)
+
+          try:
+              github = Github(github_token)
+              repo = github.get_repo(repository_name)
+              
+              genai.configure(api_key=gemini_api_key)
+              model = genai.GenerativeModel('gemini-pro')
+              
+              # Generate AI response
+              prompt = """
+              You are analyzing a CI failure in a demo repository. 
+              The build failed intentionally to test this bot.
+              
+              Provide a helpful, direct response about the failure.
+              Keep it concise and actionable.
+              """
+              
+              response = model.generate_content(prompt)
+              ai_message = response.text
+              
+              # Post comment
+              pr = repo.get_pull(int(pr_number))
+              demo_message = f"🤖 **Demo CI Failure Bot** (Gemini-powered)\n\n{ai_message}\n\n---\n*This is a demonstration of AI-powered CI failure analysis.*"
+              
+              pr.create_issue_comment(demo_message)
+              print(f"✅ Posted Gemini comment to PR #{pr_number}")
+              
+          except Exception as e:
+              print(f"Error: {e}")
+          EOF
+          
+          python bot.py

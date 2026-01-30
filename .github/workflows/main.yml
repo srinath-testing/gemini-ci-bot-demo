@@ -29,10 +29,6 @@ jobs:
         run: |
           pip install requests PyGithub google-genai
 
-      - name: Download CI Failure Bot
-        run: |
-          curl -o ci_failure_bot.py https://raw.githubusercontent.com/openwisp/openwisp-utils/issues/524-ci-failure-bot/openwisp_utils/ci_failure_bot.py
-
       - name: Run CI Failure Bot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,7 +5,6 @@ on:
     workflows: ["Demo CI Failure"]
     types:
       - completed
-  workflow_dispatch:
 
 permissions:
   issues: write
@@ -15,77 +14,30 @@ permissions:
 jobs:
   ci-failure-bot:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && !contains(github.event.workflow_run.actor.login, 'dependabot') }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          pip install requests
+          pip install requests PyGithub google-genai
+
+      - name: Download CI Failure Bot
+        run: |
+          curl -o ci_failure_bot.py https://raw.githubusercontent.com/openwisp/openwisp-utils/issues/524-ci-failure-bot/openwisp_utils/ci_failure_bot.py
 
       - name: Run CI Failure Bot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '12345' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || '1' }}
-        run: |
-          cat > bot.py << 'EOF'
-          import os
-          import sys
-          import requests
-
-          # Simple demo bot
-          github_token = os.environ.get("GITHUB_TOKEN")
-          pr_number = os.environ.get("PR_NUMBER", "1")
-          repository_name = os.environ.get("REPOSITORY")
-
-          if not all([github_token, repository_name]):
-              print("Missing required environment variables")
-              sys.exit(1)
-
-          try:
-              # Create a simple demo message
-              demo_message = """🤖 **Demo CI Failure Bot** (AI-powered)
-
-          ## CI Build Failed - Analysis Complete
-
-          **Status Summary:** The build failed as expected in this demo repository.
-
-          **Technical Diagnosis:** This is an intentional failure to demonstrate the CI failure bot functionality.
-
-          **Required Action:** 
-          - This is a demo - no action needed
-          - In a real scenario, check the CI logs for specific errors
-          - Run tests locally before pushing changes
-
-          ---
-          *This demonstrates automated CI failure analysis. In production, this would use AI to analyze actual build failures and provide specific guidance.*"""
-
-              # Post comment using GitHub API
-              url = f"https://api.github.com/repos/{repository_name}/issues/{pr_number}/comments"
-              headers = {
-                  "Authorization": f"token {github_token}",
-                  "Accept": "application/vnd.github.v3+json"
-              }
-              data = {"body": demo_message}
-              
-              response = requests.post(url, headers=headers, json=data)
-              
-              if response.status_code == 201:
-                  print(f"✅ Posted demo comment to PR #{pr_number}")
-              else:
-                  print(f"❌ Failed to post comment: {response.status_code} - {response.text}")
-                  
-          except Exception as e:
-              print(f"Error: {e}")
-          EOF
-
-          python bot.py
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || '' }}
+        run: python ci_failure_bot.py

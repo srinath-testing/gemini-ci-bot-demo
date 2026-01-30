@@ -6,13 +6,29 @@ on:
     branches: [main]
 
 jobs:
-  intentional-failure:
+  python-qa-checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: This step will fail
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          
+      - name: Install QA tools
         run: |
-          echo "Simulating a build failure..."
-          exit 1
+          pip install flake8 black isort
+          
+      - name: Run flake8
+        run: |
+          flake8 . --max-line-length=88 --extend-ignore=E203,W503
+          
+      - name: Run black check
+        run: |
+          black --check .
+          
+      - name: Run isort check
+        run: |
+          isort --check-only .

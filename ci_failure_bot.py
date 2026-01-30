@@ -9,7 +9,7 @@ import zipfile
 
 import requests
 from github import Github, GithubException
-from google import genai
+import google.generativeai as genai
 
 
 class CIFailureBot:
@@ -34,7 +34,7 @@ class CIFailureBot:
         except ValueError:
             print("Invalid WORKFLOW_RUN_ID: must be numeric")
             sys.exit(1)
-        self.github = Github(self.github_token)
+        self.github = Github(auth=Github.Auth.Token(self.github_token))
         self.repo = self.github.get_repo(self.repository_name)
         if self.gemini_api_key:
             genai.configure(api_key=self.gemini_api_key)

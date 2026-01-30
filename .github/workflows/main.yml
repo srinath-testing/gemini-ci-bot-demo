@@ -33,7 +33,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests PyGithub google-genai
+          pip install requests PyGithub google-generativeai
 
       - name: Run CI Failure Bot
         env:

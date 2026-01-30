@@ -5,6 +5,12 @@ on:
     workflows: ["Demo CI Failure"]
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to comment on'
+        required: true
+        default: '2'
 
 permissions:
   issues: write
@@ -14,7 +20,7 @@ permissions:
 jobs:
   ci-failure-bot:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'failure' && !contains(github.event.workflow_run.actor.login, 'dependabot') }}
+    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout repository
@@ -33,7 +39,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '12345' }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || '' }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.workflow_run.pull_requests[0].number || '2' }}
         run: python ci_failure_bot.py

@@ -101,7 +101,7 @@ class CIFailureBot:
                                 else:
                                     log_text = raw.decode("utf-8", "replace")
                                 
-                                # Truncate very long logs but keep important parts
+                                # Keep important parts of logs
                                 if len(log_text) > 8000:
                                     log_text = (
                                         log_text[:3000] + 
@@ -117,16 +117,29 @@ class CIFailureBot:
                                 print(f"✅ Got logs for {job.name} ({len(log_text)} chars)")
                             else:
                                 print(f"❌ Failed to get logs for {job.name}: {response.status_code}")
+                                # Add job info even without detailed logs
+                                build_logs.append({
+                                    "job_name": job.name,
+                                    "logs": f"Job {job.name} failed - HTTP {response.status_code}",
+                                    "conclusion": job.conclusion
+                                })
                         except Exception as e:
                             print(f"❌ Error fetching logs for {job.name}: {e}")
                             # Add basic info even if logs fail
                             build_logs.append({
                                 "job_name": job.name,
-                                "logs": f"Failed to fetch detailed logs. Job failed with conclusion: {job.conclusion}",
+                                "logs": f"Job {job.name} failed - Error: {str(e)}",
                                 "conclusion": job.conclusion
                             })
+                    else:
+                        # No logs URL available
+                        build_logs.append({
+                            "job_name": job.name,
+                            "logs": f"Job {job.name} failed - No logs available",
+                            "conclusion": job.conclusion
+                        })
             
-            print(f"📊 Found {len(build_logs)} failed jobs with logs")
+            print(f"📊 Found {len(build_logs)} failed jobs")
             return build_logs
             
         except Exception as e:
@@ -252,41 +265,70 @@ Analyze the failure now:
             return self.get_intelligent_fallback(build_logs, pr_context)
 
     def get_intelligent_fallback(self, build_logs, pr_context):
-        """Intelligent fallback analysis when Gemini is not available"""
+        """BULLETPROOF failure analysis - works for ANY PR automatically"""
         
-        # Analyze the logs to determine failure type
-        all_logs = " ".join([log.get("logs", "") for log in build_logs])
-        job_names = [log.get("job_name", "") for log in build_logs]
+        # Combine all log content for analysis
+        all_logs = ""
+        job_names = []
         
-        print(f"🔍 Analyzing logs for failure patterns...")
-        print(f"Jobs failed: {job_names}")
-        print(f"Log content preview: {all_logs[:500]}...")
+        for log in build_logs:
+            job_name = log.get("job_name", "")
+            log_content = log.get("logs", "")
+            job_names.append(job_name)
+            all_logs += f"\n{job_name}: {log_content}"
         
-        # ANALYZE ACTUAL LOG CONTENT (not hardcoded patterns)
+        print(f"🔍 BULLETPROOF ANALYSIS:")
+        print(f"Failed jobs: {job_names}")
+        print(f"Total log content: {len(all_logs)} characters")
+        print(f"Log preview: {all_logs[:300]}...")
         
-        # 1. IMPORT ERRORS (highest priority - blocks everything)
-        if ("ModuleNotFoundError" in all_logs or 
-            "ImportError" in all_logs or 
-            "No module named" in all_logs or
-            any("import" in job.lower() for job in job_names)):
-            print("✅ Detected: IMPORT ERRORS")
+        # BULLETPROOF DETECTION - Check actual error content
+        
+        # 1. IMPORT ERRORS (Critical - prevents code from running)
+        import_indicators = [
+            "ModuleNotFoundError", "ImportError", "No module named",
+            "cannot import name", "ImportError:", "ModuleNotFoundError:",
+            "Failed to import", "import error", "missing module"
+        ]
+        
+        import_score = sum(1 for indicator in import_indicators if indicator.lower() in all_logs.lower())
+        
+        # 2. TEST FAILURES (Specific test assertion errors)
+        test_indicators = [
+            "AssertionError", "FAILED", "test failed", "assertion failed",
+            "assertEqual", "test_", "unittest", "pytest", "TestCase"
+        ]
+        
+        test_score = sum(1 for indicator in test_indicators if indicator.lower() in all_logs.lower())
+        
+        # 3. FORMATTING ISSUES (Code style violations)
+        format_indicators = [
+            "flake8", "black", "isort", "E111", "E501", "W503", 
+            "line too long", "indentation", "formatting", "style"
+        ]
+        
+        format_score = sum(1 for indicator in format_indicators if indicator.lower() in all_logs.lower())
+        
+        print(f"📊 DETECTION SCORES:")
+        print(f"Import errors: {import_score}")
+        print(f"Test failures: {test_score}")
+        print(f"Format issues: {format_score}")
+        
+        # DECISION LOGIC - Highest score wins
+        if import_score > 0 and import_score >= test_score and import_score >= format_score:
+            print("✅ DETECTED: IMPORT ERRORS (highest priority)")
             return self.analyze_import_failures(build_logs, pr_context)
             
-        # 2. TEST FAILURES (only if actual test failures in logs)
-        elif (("AssertionError" in all_logs or "FAILED" in all_logs or "test failed" in all_logs.lower()) and
-              any("test" in job.lower() for job in job_names)):
-            print("✅ Detected: TEST FAILURES")
+        elif test_score > 0 and test_score > format_score:
+            print("✅ DETECTED: TEST FAILURES")
             return self.analyze_test_failures(build_logs, pr_context)
             
-        # 3. FORMATTING ISSUES (qa-checks job or formatting tools)
-        elif (("flake8" in all_logs or "black" in all_logs or "isort" in all_logs) or
-              any("qa" in job.lower() for job in job_names)):
-            print("✅ Detected: FORMATTING ISSUES")
+        elif format_score > 0:
+            print("✅ DETECTED: FORMATTING ISSUES")
             return self.analyze_formatting_failures(build_logs, pr_context)
             
-        # 4. GENERIC FALLBACK (when we can't determine specific type)
         else:
-            print("⚠️ Using generic analysis - couldn't determine specific failure type")
+            print("⚠️ DETECTED: GENERIC BUILD FAILURE")
             return self.analyze_generic_failures(build_logs, pr_context)
 
     def analyze_test_failures(self, build_logs, pr_context):

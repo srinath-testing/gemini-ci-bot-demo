@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Data processing utilities with intentional import errors"""
+"""Data processing utilities with intentional import errors for testing"""
 
-# These imports will fail - demonstrating import error analysis
-import nonexistent_package  # This package doesn't exist - FINAL TEST
-import pandas_typo as pd  # Typo in pandas import - should be 'pandas'
-from sklearn.nonexistent import FakeModel  # Non-existent sklearn module
-import requests_oauthlib  # Package not installed in CI environment
+# BULLETPROOF TEST: These imports will fail and bot MUST detect import errors
+import nonexistent_package  # ModuleNotFoundError - BULLETPROOF TEST
+import pandas_typo as pd  # ModuleNotFoundError - should be 'pandas'  
+from sklearn.nonexistent import FakeModel  # ImportError - Non-existent module
+import requests_oauthlib  # ModuleNotFoundError - Package not installed
 
 def process_data(data):
     """Process data using various libraries"""

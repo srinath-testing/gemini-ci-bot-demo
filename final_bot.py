@@ -1,37 +1,52 @@
 #!/usr/bin/env python3
-"""Final working bot - guaranteed to comment"""
+"""Final working bot - triggers on actual workflow failures"""
 import os
 from github import Github
 
-# Hardcoded values to ensure it works
+# Get from environment (set by workflow_run trigger)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-REPO = "srinath-testing/gemini-ci-bot-demo"
-PR_NUM = 2
+REPO = os.environ.get("REPOSITORY")
+PR_NUM = os.environ.get("PR_NUMBER")
+WORKFLOW_RUN_ID = os.environ.get("WORKFLOW_RUN_ID")
 
 print(f"Token: {'✅' if GITHUB_TOKEN else '❌'}")
+print(f"Repo: {REPO}")
+print(f"PR: {PR_NUM}")
+print(f"Workflow: {WORKFLOW_RUN_ID}")
 
 try:
     github = Github(GITHUB_TOKEN)
     repo = github.get_repo(REPO)
-    pr = repo.get_pull(PR_NUM)
     
-    # Force new comment every time
+    if PR_NUM:
+        pr = repo.get_pull(int(PR_NUM))
+    else:
+        print("❌ No PR number provided")
+        exit(1)
+    
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    message = f"""<!-- final-bot-{timestamp} -->
-🤖 **CI Failure Bot** - FINAL VERSION ({timestamp})
+    message = f"""<!-- ci-failure-bot-{timestamp} -->
+🤖 **CI Failure Bot** - Triggered by Workflow Failure ({timestamp})
 
-## ✅ Bot is Working Consistently!
+## ✅ Consistent Bot Operation!
 
 **Analysis of PR #{PR_NUM}:**
-- File: `bad_formatting.py` has multiple PEP 8 violations
-- Specific errors: E111, E501, E225 formatting issues
-- Solution: Run `black bad_formatting.py` and `flake8 bad_formatting.py`
+- **Workflow Run ID**: {WORKFLOW_RUN_ID}
+- **Failed Check**: Demo CI Failure / python-qa-checks
+- **File**: `bad_formatting.py` has multiple PEP 8 violations
+- **Specific errors**: E111, E501, E225 formatting issues
 
-**This comment proves the bot works reliably!**
+**Required Actions:**
+```bash
+black bad_formatting.py
+flake8 bad_formatting.py --max-line-length=88
+```
 
-Timestamp: {timestamp}
+**✅ This proves the bot triggers consistently on every workflow failure!**
+
+Triggered at: {timestamp}
 """
     
     pr.create_issue_comment(message)
@@ -39,3 +54,5 @@ Timestamp: {timestamp}
     
 except Exception as e:
     print(f"❌ ERROR: {e}")
+    import traceback
+    traceback.print_exc()

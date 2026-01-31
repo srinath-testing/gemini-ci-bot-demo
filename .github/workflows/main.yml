@@ -8,6 +8,7 @@ permissions:
   issues: write
   pull-requests: write
   contents: read
+  metadata: read
 
 jobs:
   ci-failure-bot:

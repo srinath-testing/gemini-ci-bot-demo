@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Data processing utilities with intentional import errors for testing"""
 
-# BULLETPROOF TEST: These imports will fail and bot MUST detect import errors
-import nonexistent_package  # ModuleNotFoundError - BULLETPROOF TEST
+# AUTOMATIC TEST: Bot must detect import errors for ANY PR automatically
+import nonexistent_package  # ModuleNotFoundError - AUTO DETECTION TEST
 import pandas_typo as pd  # ModuleNotFoundError - should be 'pandas'  
 from sklearn.nonexistent import FakeModel  # ImportError - Non-existent module
 import requests_oauthlib  # ModuleNotFoundError - Package not installed

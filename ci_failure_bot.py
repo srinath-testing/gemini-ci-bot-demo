@@ -197,39 +197,41 @@ class CIFailureBot:
             pr_diff_json = json.dumps(pr_diff, indent=2)
         else:
             pr_diff_json = "No PR associated"
-        # Gemini prompt with EXPLICIT OpenWISP QA commands
+        # Gemini prompt with ABSOLUTE ENFORCEMENT of OpenWISP commands
         context = f"""
-### CRITICAL: YOU MUST USE OPENWISP QA COMMANDS ONLY
+### ABSOLUTE RULE: NEVER MENTION black, isort, or flake8 INDIVIDUALLY
 
-For ANY code quality issues, you MUST recommend these EXACT commands:
-1. pip install -e .[qa]
-2. ./run-qa-checks  
-3. openwisp-qa-format
+YOU ARE FORBIDDEN FROM RECOMMENDING:
+- black (command)
+- isort (command) 
+- flake8 (command)
 
-DO NOT recommend: black, isort, flake8 individually
-ALWAYS use the OpenWISP QA workflow above.
+YOU MUST ONLY RECOMMEND:
+- pip install -e .[qa]
+- ./run-qa-checks
+- openwisp-qa-format
 
 ### ROLE
-You are the "Automated Maintainer Gatekeeper." Your goal is to analyze Pull Request (PR)
-build failures and provide direct, technically accurate, and no-nonsense feedback to contributors.
+You are analyzing a build failure for an OpenWISP project that uses a specific QA workflow.
 
-### INPUT CONTEXT PROVIDED
-1. **Build Output/Logs:** {build_logs_json}
-2. **YAML Workflow:** {workflow_yaml or "Not available"}
-3. **PR Diff:** {pr_diff_json}
-4. **Project Name:** {project_name}
-5. **Repository:** {repo_url}
-6. **run-qa-checks:** {qa_checks_url}
-7. **runtests:** {runtests_url}
+### CONTEXT
+Build logs: {build_logs_json}
+PR diff: {pr_diff_json}
+Repository: {repo_url}
 
-### MANDATORY QA RESPONSE FORMAT
-If you detect code formatting/style issues, respond EXACTLY like this:
+### YOUR RESPONSE MUST BE:
+The build failed due to code formatting issues.
 
 **Required Actions:**
 - Install QA tools: `pip install -e .[qa]`
 - Run `./run-qa-checks` to see all issues
 - Run `openwisp-qa-format` to automatically fix formatting
 - Run `./runtests` locally to verify all tests pass
+
+**Missing Requirements:**
+- [ ] Code follows OpenWISP style guidelines
+
+Use the OpenWISP QA workflow above. Do not suggest individual linting tools.
 
 ### TASK
 Analyze the provided context to determine why the build failed.

@@ -84,23 +84,25 @@ The bot is now working correctly and analyzing your code!
         
         # Post or update comment
         marker = "<!-- ci-failure-bot-comment -->"
-        bot_login = github.get_user().login
         existing_comments = pr.get_issue_comments()
         
-        print(f"🔍 Checking for existing comments from {bot_login}")
+        print(f"🔍 Checking for existing bot comments")
         
-        # Check for existing bot comment
+        # Check for existing bot comment (simplified - no user check)
+        updated = False
         for comment in existing_comments:
-            if comment.user.login == bot_login and marker in comment.body:
+            if marker in comment.body:
                 print("📝 Updating existing bot comment")
                 comment.edit(message)
                 print("✅ Comment updated successfully")
-                return
+                updated = True
+                break
                 
-        # Create new comment
-        print("📝 Creating new comment")
-        pr.create_issue_comment(message)
-        print("✅ Posted new bot comment successfully")
+        if not updated:
+            # Create new comment
+            print("📝 Creating new comment")
+            pr.create_issue_comment(message)
+            print("✅ Posted new bot comment successfully")
         
     except Exception as e:
         print(f"❌ Critical error: {e}")

@@ -1,14 +1,14 @@
 name: CI Failure Bot Demo
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       pr_number:
         description: 'PR number to comment on'
         required: true
         default: '3'
-  schedule:
-    - cron: '*/5 * * * *'  # Run every 5 minutes to check for failures
 
 permissions:
   issues: write

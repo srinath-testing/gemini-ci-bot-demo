@@ -8,7 +8,7 @@ on:
       pr_number:
         description: 'PR number to comment on'
         required: true
-        default: '3'
+        default: '2'
 
 permissions:
   issues: write
@@ -32,6 +32,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install requests PyGithub google-generativeai
+
+      - name: Debug Environment
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "PR Number: ${{ github.event.inputs.pr_number || '2' }}"
+          echo "Event: ${{ github.event_name }}"
 
       - name: Run CI Failure Bot
         env:

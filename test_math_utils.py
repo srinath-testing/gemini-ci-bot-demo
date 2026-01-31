@@ -11,7 +11,7 @@ class TestMathUtils(unittest.TestCase):
     def test_multiplication(self):
         """Test multiplication - this will also fail"""
         result = 3 * 4
-        self.assertEqual(result, 13)  # Intentionally wrong
+        self.assertEqual(result, 13)  # Intentionally wrong - FINAL TEST
 
     def test_division(self):
         """Test division - this will also fail now"""

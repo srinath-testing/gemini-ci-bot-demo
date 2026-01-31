@@ -6,6 +6,26 @@ on:
     branches: [main]
 
 jobs:
+  yaml-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          
+      - name: Install YAML tools
+        run: |
+          pip install PyYAML
+          
+      - name: Validate YAML files
+        run: |
+          # This will fail for PR #5 due to YAML syntax errors
+          python yaml_processor.py
+
   python-qa-checks:
     runs-on: ubuntu-latest
     steps:

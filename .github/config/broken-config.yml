@@ -1,0 +1,29 @@
+# Broken YAML configuration file with syntax errors
+app_config:
+  name: "Demo App"
+  version: 1.0
+  settings:
+    debug: true
+    database:
+      host: localhost
+      port: 5432
+      # Missing closing quote and colon syntax error
+      username: "admin
+      password: secret123
+    # Indentation error below
+  cache:
+      enabled: true
+      # Invalid YAML structure
+      timeout: 30
+    invalid_key_no_colon "this will break YAML parsing"
+    another-broken: 
+      - item1
+      - item2
+      # Missing dash for list item
+      item3
+    # Tab character instead of spaces (YAML doesn't allow tabs)
+	tab_indented_key: "this uses tab character"
+    
+# Duplicate key (YAML error)
+app_config:
+  duplicate: "This key already exists above"

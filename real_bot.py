@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REAL CI Failure Bot - analyzes actual build logs"""
+"""INTELLIGENT CI Failure Bot - analyzes PRIMARY failure cause"""
 import os
 import io
 import zipfile
@@ -20,7 +20,12 @@ try:
     workflow_run = repo.get_workflow_run(int(WORKFLOW_RUN_ID))
     jobs = workflow_run.jobs()
     
-    real_errors = []
+    # PRIORITY-BASED ERROR DETECTION
+    import_errors = []
+    test_errors = []
+    qa_errors = []
+    other_errors = []
+    
     for job in jobs:
         if job.conclusion == "failure":
             # Get actual logs
@@ -43,77 +48,72 @@ try:
                     else:
                         log_text = raw.decode("utf-8", "replace")
                     
-                    # Extract REAL errors from logs
-                    if "FAILED" in log_text and "test_" in log_text:
-                        real_errors.append(f"**{job.name}**: Unit test failures detected in logs")
-                    elif "ModuleNotFoundError" in log_text or "ImportError" in log_text:
-                        real_errors.append(f"**{job.name}**: Import/dependency errors detected")
-                    elif "flake8" in log_text and "error" in log_text.lower():
-                        real_errors.append(f"**{job.name}**: Flake8 style violations detected")
-                    elif "black" in log_text and "would reformat" in log_text:
-                        real_errors.append(f"**{job.name}**: Black formatting issues detected")
+                    # PRIORITIZE ERROR TYPES (most critical first)
+                    if "ModuleNotFoundError" in log_text or "ImportError" in log_text:
+                        import_errors.append(f"**{job.name}**: Import/dependency errors")
+                    elif "FAILED" in log_text and "test_" in log_text and "AssertionError" in log_text:
+                        test_errors.append(f"**{job.name}**: Unit test assertion failures")
+                    elif "flake8" in log_text or "black" in log_text or "isort" in log_text:
+                        qa_errors.append(f"**{job.name}**: Code quality issues")
                     else:
-                        real_errors.append(f"**{job.name}**: Build failure (check logs)")
+                        other_errors.append(f"**{job.name}**: Build failure")
     
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    if real_errors:
-        # Determine message type based on error content
-        if any("Import/dependency errors" in error for error in real_errors):
-            message = f"""<!-- ci-failure-bot-{timestamp} -->
+    # ANALYZE PRIMARY FAILURE (highest priority first)
+    if import_errors:
+        # IMPORT ERRORS are highest priority
+        message = f"""<!-- ci-failure-bot-{timestamp} -->
 🤖 **CI Failure Bot** - Import Error Analysis ({timestamp})
 
 ## ❌ Import/Dependency Errors Detected
 
 **Analysis of PR #{PR_NUM}:**
 - **Workflow Run ID**: {WORKFLOW_RUN_ID}
-- **Error Type**: Missing dependencies or incorrect imports
-- **Real Issues Found**: {len(real_errors)}
+- **Primary Issue**: Missing dependencies or incorrect imports
+- **Failed Jobs**: {len(import_errors)}
 
-**Actual Errors from Build Logs:**
-{chr(10).join(f"- {error}" for error in real_errors)}
+**Critical Errors Found:**
+{chr(10).join(f"- {error}" for error in import_errors)}
 
 **Technical Diagnosis:**
-- ModuleNotFoundError or ImportError detected in build logs
-- Missing required packages or incorrect import statements
-- Dependencies not installed or package names misspelled
+- ModuleNotFoundError or ImportError in build logs
+- Missing required packages or misspelled package names
+- Import statements referencing non-existent modules
 
 **Required Actions:**
 ```bash
-# Check for missing packages
-pip install -r requirements.txt
+# Check import statements for typos
+python -c "import your_module_name"
 
-# Verify import statements
-python -c "import your_module"
-
-# Fix package names and import paths
 # Install missing dependencies
-```
+pip install package_name
 
-**Next Steps:**
-1. Review import statements for typos
-2. Install missing dependencies
-3. Check package availability in PyPI
-4. Test imports locally before pushing
+# Verify all imports work
+python -m py_compile your_file.py
+```
 
 **Root Cause**: Missing or incorrectly named dependencies.
 
+**Priority**: HIGH - Import errors prevent code execution.
+
 Analyzed at: {timestamp}
 """
-        elif any("Unit test failures" in error for error in real_errors):
-            message = f"""<!-- ci-failure-bot-{timestamp} -->
+    elif test_errors:
+        # TEST ERRORS are second priority
+        message = f"""<!-- ci-failure-bot-{timestamp} -->
 🤖 **CI Failure Bot** - Test Failure Analysis ({timestamp})
 
 ## ❌ Unit Test Failures Detected
 
 **Analysis of PR #{PR_NUM}:**
 - **Workflow Run ID**: {WORKFLOW_RUN_ID}
-- **Error Type**: Test assertion failures
-- **Real Issues Found**: {len(real_errors)}
+- **Primary Issue**: Test assertion failures
+- **Failed Jobs**: {len(test_errors)}
 
-**Actual Errors from Build Logs:**
-{chr(10).join(f"- {error}" for error in real_errors)}
+**Test Failures Found:**
+{chr(10).join(f"- {error}" for error in test_errors)}
 
 **Required Actions:**
 ```bash
@@ -125,45 +125,55 @@ python -m pytest -v
 
 Analyzed at: {timestamp}
 """
-        else:
-            message = f"""<!-- ci-failure-bot-{timestamp} -->
+    elif qa_errors:
+        # QA ERRORS are lowest priority
+        message = f"""<!-- ci-failure-bot-{timestamp} -->
+🤖 **CI Failure Bot** - Code Quality Analysis ({timestamp})
+
+## ❌ Code Quality Issues Detected
+
+**Analysis of PR #{PR_NUM}:**
+- **Workflow Run ID**: {WORKFLOW_RUN_ID}
+- **Primary Issue**: Code formatting violations
+- **Failed Jobs**: {len(qa_errors)}
+
+**Quality Issues Found:**
+{chr(10).join(f"- {error}" for error in qa_errors)}
+
+**Required Actions:**
+```bash
+black .
+isort .
+flake8 . --max-line-length=88
+```
+
+**Root Cause**: Code doesn't follow style guidelines.
+
+Analyzed at: {timestamp}
+"""
+    else:
+        # FALLBACK for other errors
+        all_errors = other_errors
+        message = f"""<!-- ci-failure-bot-{timestamp} -->
 🤖 **CI Failure Bot** - Build Failure Analysis ({timestamp})
 
 ## ❌ Build Failures Detected
 
 **Analysis of PR #{PR_NUM}:**
 - **Workflow Run ID**: {WORKFLOW_RUN_ID}
-- **Real Issues Found**: {len(real_errors)}
+- **Issues Found**: {len(all_errors)}
 
-**Actual Errors from Build Logs:**
-{chr(10).join(f"- {error}" for error in real_errors)}
-
-**Required Actions:**
-Based on the actual failures above, please:
-1. Check the specific error messages in the CI logs
-2. Fix the identified issues
-3. Test locally before pushing
-
-Analyzed at: {timestamp}
-"""
-    else:
-        message = f"""<!-- ci-failure-bot-{timestamp} -->
-🤖 **CI Failure Bot** - Analysis ({timestamp})
-
-## ⚠️ Build Failed - Unable to Parse Logs
-
-**Analysis of PR #{PR_NUM}:**
-- **Workflow Run ID**: {WORKFLOW_RUN_ID}
-- **Status**: Could not extract specific error details from logs
+**Errors Found:**
+{chr(10).join(f"- {error}" for error in all_errors)}
 
 **Required Actions:**
-Please check the CI logs manually for specific error messages.
+Check the CI logs for specific error details.
 
 Analyzed at: {timestamp}
 """
     
     pr.create_issue_comment(message)
-    print(f"✅ SUCCESS: Posted REAL analysis based on actual logs")
+    print(f"✅ SUCCESS: Posted INTELLIGENT analysis based on PRIMARY failure type")
     
 except Exception as e:
     print(f"❌ ERROR: {e}")

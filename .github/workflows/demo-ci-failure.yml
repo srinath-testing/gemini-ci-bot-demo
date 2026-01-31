@@ -6,6 +6,25 @@ on:
     branches: [main]
 
 jobs:
+  python-import-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          
+      - name: Check imports
+        run: |
+          # This will fail for files with import errors
+          python -c "import data_processor" || echo "Import check failed"
+          python -c "import test_data_processor" || echo "Test import failed"
+          python -m py_compile data_processor.py
+          python -m py_compile test_data_processor.py
+
   python-qa-checks:
     runs-on: ubuntu-latest
     steps:
@@ -50,4 +69,4 @@ jobs:
           
       - name: Run tests
         run: |
-          python -m pytest test_math_utils.py -v || true
+          python -m pytest test_data_processor.py -v

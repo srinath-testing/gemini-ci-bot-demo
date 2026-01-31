@@ -44,4 +44,4 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.inputs.pr_number || '3' }}
-        run: python ci_failure_bot.py
+        run: python simple_bot_test.py

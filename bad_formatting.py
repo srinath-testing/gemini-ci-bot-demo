@@ -15,3 +15,4 @@ def another_bad_function( ):
      print("inconsistent indentation")
     else:
       print( "more spacing issues" )# Test comment
+# Trigger workflow failure

@@ -14,9 +14,9 @@ class TestMathUtils(unittest.TestCase):
         self.assertEqual(result, 13)  # Intentionally wrong
 
     def test_division(self):
-        """Test division - this will pass"""
+        """Test division - this will also fail now"""
         result = 10 / 2
-        self.assertEqual(result, 5.0)
+        self.assertEqual(result, 6.0)  # Changed to fail
 
 if __name__ == "__main__":
     unittest.main()

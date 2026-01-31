@@ -2,10 +2,10 @@
 """Data processing utilities with intentional import errors"""
 
 # These imports will fail - demonstrating import error analysis
-import nonexistent_package  # This package doesn't exist
-import pandas_typo as pd  # Typo in pandas import
+import nonexistent_package  # This package doesn't exist - FINAL TEST
+import pandas_typo as pd  # Typo in pandas import - should be 'pandas'
 from sklearn.nonexistent import FakeModel  # Non-existent sklearn module
-import requests_oauthlib  # Package not installed in CI
+import requests_oauthlib  # Package not installed in CI environment
 
 def process_data(data):
     """Process data using various libraries"""

@@ -184,8 +184,69 @@ class CIFailureBot:
 
     def analyze_with_gemini(self, build_logs, pr_diff, workflow_yaml):
         """Send context to Gemini for intelligent analysis"""
-        # FORCE FALLBACK FOR TESTING OPENWISP QA COMMANDS
-        return self.fallback_response()
+        # Prepare context for Gemini
+        project_name = self.repository_name.split("/")[-1]
+        repo_url = f"https://github.com/{self.repository_name}"
+        # Use dynamic branch detection instead of hardcoded "master"
+        default_branch = self.repo.default_branch
+        qa_checks_url = f"{repo_url}/blob/{default_branch}/openwisp-qa-check"
+        runtests_url = f"{repo_url}/blob/{default_branch}/runtests"
+        # Build the context string with proper line breaks
+        build_logs_json = json.dumps(build_logs, indent=2)
+        if pr_diff:
+            pr_diff_json = json.dumps(pr_diff, indent=2)
+        else:
+            pr_diff_json = "No PR associated"
+        # Gemini prompt with EXPLICIT OpenWISP QA commands
+        context = f"""
+### CRITICAL: YOU MUST USE OPENWISP QA COMMANDS ONLY
+
+For ANY code quality issues, you MUST recommend these EXACT commands:
+1. pip install -e .[qa]
+2. ./run-qa-checks  
+3. openwisp-qa-format
+
+DO NOT recommend: black, isort, flake8 individually
+ALWAYS use the OpenWISP QA workflow above.
+
+### ROLE
+You are the "Automated Maintainer Gatekeeper." Your goal is to analyze Pull Request (PR)
+build failures and provide direct, technically accurate, and no-nonsense feedback to contributors.
+
+### INPUT CONTEXT PROVIDED
+1. **Build Output/Logs:** {build_logs_json}
+2. **YAML Workflow:** {workflow_yaml or "Not available"}
+3. **PR Diff:** {pr_diff_json}
+4. **Project Name:** {project_name}
+5. **Repository:** {repo_url}
+6. **run-qa-checks:** {qa_checks_url}
+7. **runtests:** {runtests_url}
+
+### MANDATORY QA RESPONSE FORMAT
+If you detect code formatting/style issues, respond EXACTLY like this:
+
+**Required Actions:**
+- Install QA tools: `pip install -e .[qa]`
+- Run `./run-qa-checks` to see all issues
+- Run `openwisp-qa-format` to automatically fix formatting
+- Run `./runtests` locally to verify all tests pass
+
+### TASK
+Analyze the provided context to determine why the build failed.
+Use the MANDATORY QA RESPONSE FORMAT above for any formatting issues.
+
+Analyze the failure and provide your response:
+"""
+        try:
+            # Check if Gemini is available
+            if not self.model:
+                return self.fallback_response()
+            # Use Gemini client API
+            response = self.model.generate_content(context)
+            return response.text
+        except (ValueError, ConnectionError, Exception) as e:
+            print(f"Error calling Gemini API: {e}")
+            return self.fallback_response()
 
     def fallback_response(self):
         """Fallback response if Gemini fails"""

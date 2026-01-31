@@ -6,7 +6,7 @@ class TestMathUtils(unittest.TestCase):
     def test_addition(self):
         """Test basic addition - this will fail intentionally"""
         result = 2 + 2
-        self.assertEqual(result, 5)  # Intentionally wrong to trigger failure
+        self.assertEqual(result, 5)  # Intentionally wrong - trigger AI analysis
 
     def test_multiplication(self):
         """Test multiplication - this will also fail"""

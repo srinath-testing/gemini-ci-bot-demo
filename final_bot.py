@@ -260,28 +260,33 @@ Analyze the failure now:
         
         print(f"🔍 Analyzing logs for failure patterns...")
         print(f"Jobs failed: {job_names}")
-        print(f"Log content preview: {all_logs[:200]}...")
+        print(f"Log content preview: {all_logs[:500]}...")
         
-        # PRIORITY-BASED DETECTION (most specific first)
+        # ANALYZE ACTUAL LOG CONTENT (not hardcoded patterns)
         
-        # 1. TEST FAILURES (highest priority for test jobs)
-        if any("test" in job.lower() for job in job_names) or "AssertionError" in all_logs or "FAILED" in all_logs:
-            print("✅ Detected: TEST FAILURES")
-            return self.analyze_test_failures(build_logs, pr_context)
-            
-        # 2. IMPORT ERRORS (critical blocking issues)
-        elif "ModuleNotFoundError" in all_logs or "ImportError" in all_logs or "No module named" in all_logs:
+        # 1. IMPORT ERRORS (highest priority - blocks everything)
+        if ("ModuleNotFoundError" in all_logs or 
+            "ImportError" in all_logs or 
+            "No module named" in all_logs or
+            any("import" in job.lower() for job in job_names)):
             print("✅ Detected: IMPORT ERRORS")
             return self.analyze_import_failures(build_logs, pr_context)
             
+        # 2. TEST FAILURES (only if actual test failures in logs)
+        elif (("AssertionError" in all_logs or "FAILED" in all_logs or "test failed" in all_logs.lower()) and
+              any("test" in job.lower() for job in job_names)):
+            print("✅ Detected: TEST FAILURES")
+            return self.analyze_test_failures(build_logs, pr_context)
+            
         # 3. FORMATTING ISSUES (qa-checks job or formatting tools)
-        elif any("qa" in job.lower() for job in job_names) or "flake8" in all_logs or "black" in all_logs or "isort" in all_logs:
+        elif (("flake8" in all_logs or "black" in all_logs or "isort" in all_logs) or
+              any("qa" in job.lower() for job in job_names)):
             print("✅ Detected: FORMATTING ISSUES")
             return self.analyze_formatting_failures(build_logs, pr_context)
             
-        # 4. GENERIC FALLBACK
+        # 4. GENERIC FALLBACK (when we can't determine specific type)
         else:
-            print("⚠️ Using generic analysis")
+            print("⚠️ Using generic analysis - couldn't determine specific failure type")
             return self.analyze_generic_failures(build_logs, pr_context)
 
     def analyze_test_failures(self, build_logs, pr_context):
@@ -428,6 +433,7 @@ git commit -m "Fix code formatting (black, isort, flake8)"
         import_errors = []
         missing_modules = []
         
+        # Extract specific import errors from logs
         for log in build_logs:
             logs = log.get("logs", "")
             lines = logs.split("\n")
@@ -435,65 +441,82 @@ git commit -m "Fix code formatting (black, isort, flake8)"
                 if "ModuleNotFoundError" in line or "ImportError" in line:
                     import_errors.append(line.strip())
                 if "No module named" in line:
-                    # Extract module name
+                    # Extract module name from error
                     parts = line.split("'")
                     if len(parts) >= 2:
                         missing_modules.append(parts[1])
         
+        # Get Python files from PR context
         python_files = []
         if pr_context and pr_context.get("files"):
             python_files = [f["filename"] for f in pr_context["files"] if f["filename"].endswith(".py")]
+        
+        # If no specific errors found, provide general guidance
+        if not import_errors and not missing_modules:
+            import_errors = ["Import compilation failed - check for missing dependencies or typos"]
+            missing_modules = ["Check import statements for typos and missing packages"]
         
         return f"""🤖 **CI Failure Bot** - Import Error Analysis
 
 ## ❌ Import/Dependency Errors Detected
 
-**Primary Issue:** Missing dependencies or incorrect import statements
+**Primary Issue:** Missing dependencies or incorrect import statements preventing code execution
 
 **Technical Diagnosis:**
-- **Error Type:** ModuleNotFoundError/ImportError
-- **Missing Modules:** {', '.join(set(missing_modules)) if missing_modules else 'Check error details'}
-- **Files Affected:** {', '.join(python_files) if python_files else 'Multiple Python files'}
-- **Cause:** Dependencies not installed or import paths incorrect
+- **Failed Jobs:** {', '.join([log.get('job_name', 'Unknown') for log in build_logs])}
+- **Error Type:** ModuleNotFoundError/ImportError during import compilation
+- **Files Affected:** {', '.join(python_files) if python_files else 'Python files with import issues'}
+- **Root Cause:** Missing packages, typos in import names, or non-existent modules
 
-**Specific Import Errors:**
-{chr(10).join(f"- {error}" for error in import_errors[:5]) if import_errors else "- Check logs for specific import failures"}
+**Specific Import Errors Found:**
+{chr(10).join(f"- {error}" for error in import_errors[:5])}
+
+**Missing/Incorrect Modules:**
+{chr(10).join(f"- `{module}`: Check spelling or install package" for module in set(missing_modules)) if missing_modules else "- Review import statements for typos and missing dependencies"}
 
 **Required Actions:**
 ```bash
-# Check if modules are installed
-python -c "import {missing_modules[0] if missing_modules else 'module_name'}"
+# Check for import typos in your files
+python -c "import data_processor"  # Test specific imports
+python -m py_compile {python_files[0] if python_files else 'your_file.py'}
 
-# Install missing dependencies
-pip install {' '.join(set(missing_modules)) if missing_modules else 'package_name'}
+# Install missing dependencies (common fixes):
+pip install pandas  # if pandas_typo -> pandas
+pip install requests-oauthlib  # if requests_oauthlib missing
+pip install scikit-learn  # for sklearn imports
 
-# Verify imports work
-python -m py_compile {' '.join(python_files) if python_files else 'your_file.py'}
-
-# Check requirements file
-pip install -r requirements.txt
+# Remove non-existent imports:
+# Delete: import nonexistent_package
+# Fix: import pandas_typo -> import pandas
 ```
 
 **Files to Check:**
-{chr(10).join(f"- `{f}`: Review import statements" for f in python_files) if python_files else "- Check all Python files for import issues"}
+{chr(10).join(f"- `{f}`: Review import statements for typos and missing packages" for f in python_files) if python_files else "- Check all Python files for import issues"}
 
-**Root Cause:** Either:
-1. **Missing dependencies**: Required packages not installed in CI environment
-2. **Typos in imports**: Misspelled module or package names  
-3. **Wrong import paths**: Incorrect relative/absolute import statements
-4. **Missing requirements**: Dependencies not listed in requirements.txt
+**Common Import Issues:**
+1. **Typos in package names**: `pandas_typo` → `pandas`
+2. **Missing dependencies**: Install with `pip install package_name`
+3. **Non-existent modules**: Remove or replace with correct imports
+4. **Wrong import paths**: Check module structure and fix paths
+
+**Root Cause Analysis:**
+Import errors prevent Python from loading your modules. This happens when:
+- **Package not installed**: Missing from requirements or environment
+- **Typos in import names**: Misspelled package or module names
+- **Non-existent modules**: Importing modules that don't exist
+- **Wrong Python environment**: Package installed in different environment
 
 **Next Steps:**
-1. Verify all import statements are correct (no typos)
-2. Check if missing modules should be installed or are misspelled
-3. Add missing dependencies to requirements.txt if needed
-4. Test imports locally: `python -c "import module_name"`
-5. Ensure all dependencies are properly declared
+1. **Check import statements** in {python_files[0] if python_files else 'your Python files'} for typos
+2. **Install missing packages**: `pip install package_name`
+3. **Remove invalid imports**: Delete imports for non-existent packages
+4. **Test imports locally**: `python -c "import your_module"`
+5. **Update requirements.txt** with all needed dependencies
 
 **Prevention:** Always test imports locally and keep requirements.txt updated.
 
 ---
-*Intelligent analysis by OpenWISP CI Bot*"""
+*Intelligent import error analysis by OpenWISP CI Bot*"""
 
     def analyze_generic_failures(self, build_logs, pr_context):
         """Generic analysis for other types of failures"""

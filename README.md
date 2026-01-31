@@ -3,4 +3,4 @@ Demo repository for testing Gemini-powered CI failure bot
 "Testing the Gemini bot "
 
 ## Test Status
-Bot should comment on PR #2 after this push - testing QA failures.
+Bot should comment on PR #2 NOW - triggering immediate run.

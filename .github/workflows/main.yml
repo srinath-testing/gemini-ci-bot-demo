@@ -39,4 +39,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.inputs.pr_number || '3' }}
-        run: python working_bot.py
+        run: python real_bot.py

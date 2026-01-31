@@ -3,18 +3,11 @@ name: CI Failure Bot Demo
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to comment on'
-        required: true
-        default: '2'
 
 permissions:
   issues: write
   pull-requests: write
   contents: read
-  actions: read
 
 jobs:
   ci-failure-bot:
@@ -22,27 +15,20 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          pip install requests PyGithub google-generativeai
-
-      - name: Debug Environment
-        run: |
-          echo "Repository: ${{ github.repository }}"
-          echo "PR Number: ${{ github.event.inputs.pr_number || '2' }}"
-          echo "Event: ${{ github.event_name }}"
+          pip install requests PyGithub
 
       - name: Run CI Failure Bot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.inputs.pr_number || '2' }}
+          PR_NUMBER: "2"
         run: python simple_ci_bot.py

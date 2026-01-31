@@ -46,6 +46,8 @@ try:
                     # Extract REAL errors from logs
                     if "FAILED" in log_text and "test_" in log_text:
                         real_errors.append(f"**{job.name}**: Unit test failures detected in logs")
+                    elif "ModuleNotFoundError" in log_text or "ImportError" in log_text:
+                        real_errors.append(f"**{job.name}**: Import/dependency errors detected")
                     elif "flake8" in log_text and "error" in log_text.lower():
                         real_errors.append(f"**{job.name}**: Flake8 style violations detected")
                     elif "black" in log_text and "would reformat" in log_text:
@@ -57,10 +59,77 @@ try:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     if real_errors:
-        message = f"""<!-- ci-failure-bot-{timestamp} -->
-🤖 **CI Failure Bot** - Real Error Analysis ({timestamp})
+        # Determine message type based on error content
+        if any("Import/dependency errors" in error for error in real_errors):
+            message = f"""<!-- ci-failure-bot-{timestamp} -->
+🤖 **CI Failure Bot** - Import Error Analysis ({timestamp})
 
-## ❌ Actual Build Failures Detected
+## ❌ Import/Dependency Errors Detected
+
+**Analysis of PR #{PR_NUM}:**
+- **Workflow Run ID**: {WORKFLOW_RUN_ID}
+- **Error Type**: Missing dependencies or incorrect imports
+- **Real Issues Found**: {len(real_errors)}
+
+**Actual Errors from Build Logs:**
+{chr(10).join(f"- {error}" for error in real_errors)}
+
+**Technical Diagnosis:**
+- ModuleNotFoundError or ImportError detected in build logs
+- Missing required packages or incorrect import statements
+- Dependencies not installed or package names misspelled
+
+**Required Actions:**
+```bash
+# Check for missing packages
+pip install -r requirements.txt
+
+# Verify import statements
+python -c "import your_module"
+
+# Fix package names and import paths
+# Install missing dependencies
+```
+
+**Next Steps:**
+1. Review import statements for typos
+2. Install missing dependencies
+3. Check package availability in PyPI
+4. Test imports locally before pushing
+
+**Root Cause**: Missing or incorrectly named dependencies.
+
+Analyzed at: {timestamp}
+"""
+        elif any("Unit test failures" in error for error in real_errors):
+            message = f"""<!-- ci-failure-bot-{timestamp} -->
+🤖 **CI Failure Bot** - Test Failure Analysis ({timestamp})
+
+## ❌ Unit Test Failures Detected
+
+**Analysis of PR #{PR_NUM}:**
+- **Workflow Run ID**: {WORKFLOW_RUN_ID}
+- **Error Type**: Test assertion failures
+- **Real Issues Found**: {len(real_errors)}
+
+**Actual Errors from Build Logs:**
+{chr(10).join(f"- {error}" for error in real_errors)}
+
+**Required Actions:**
+```bash
+python -m pytest -v
+# Fix failing test assertions
+```
+
+**Root Cause**: Test assertion mismatches.
+
+Analyzed at: {timestamp}
+"""
+        else:
+            message = f"""<!-- ci-failure-bot-{timestamp} -->
+🤖 **CI Failure Bot** - Build Failure Analysis ({timestamp})
+
+## ❌ Build Failures Detected
 
 **Analysis of PR #{PR_NUM}:**
 - **Workflow Run ID**: {WORKFLOW_RUN_ID}
@@ -74,8 +143,6 @@ Based on the actual failures above, please:
 1. Check the specific error messages in the CI logs
 2. Fix the identified issues
 3. Test locally before pushing
-
-**✅ This analysis is based on REAL build log content, not assumptions.**
 
 Analyzed at: {timestamp}
 """

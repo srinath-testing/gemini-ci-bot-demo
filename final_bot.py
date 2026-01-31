@@ -80,64 +80,449 @@ class CIFailureBot:
             for job in jobs:
                 print(f"Job: {job.name} - Status: {job.conclusion}")
                 if job.conclusion == "failure":
-                    build_logs.append({
-                        "job_name": job.name,
-                        "logs": f"Job {job.name} failed - detailed logs would be here",
-                    })
+                    # Get actual logs from GitHub API
+                    logs_url = job.logs_url
+                    if logs_url:
+                        headers = {
+                            "Authorization": f"token {self.github_token}",
+                            "Accept": "application/vnd.github.v3+json",
+                        }
+                        try:
+                            response = requests.get(logs_url, headers=headers, timeout=30)
+                            if response.status_code == 200:
+                                raw = response.content
+                                if raw[:2] == b"PK":  # ZIP file signature
+                                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                                        parts = []
+                                        for name in zf.namelist():
+                                            if name.endswith(".txt"):
+                                                parts.append(zf.read(name).decode("utf-8", "replace"))
+                                        log_text = "\n".join(parts).strip()
+                                else:
+                                    log_text = raw.decode("utf-8", "replace")
+                                
+                                # Truncate very long logs but keep important parts
+                                if len(log_text) > 8000:
+                                    log_text = (
+                                        log_text[:3000] + 
+                                        "\n\n[...middle truncated...]\n\n" + 
+                                        log_text[-5000:]
+                                    )
+                                
+                                build_logs.append({
+                                    "job_name": job.name,
+                                    "logs": log_text,
+                                    "conclusion": job.conclusion
+                                })
+                                print(f"✅ Got logs for {job.name} ({len(log_text)} chars)")
+                            else:
+                                print(f"❌ Failed to get logs for {job.name}: {response.status_code}")
+                        except Exception as e:
+                            print(f"❌ Error fetching logs for {job.name}: {e}")
+                            # Add basic info even if logs fail
+                            build_logs.append({
+                                "job_name": job.name,
+                                "logs": f"Failed to fetch detailed logs. Job failed with conclusion: {job.conclusion}",
+                                "conclusion": job.conclusion
+                            })
             
-            print(f"📊 Found {len(build_logs)} failed jobs")
+            print(f"📊 Found {len(build_logs)} failed jobs with logs")
             return build_logs
             
         except Exception as e:
             print(f"❌ Error getting build logs: {e}")
             return []
 
-    def analyze_with_gemini(self, build_logs, pr_diff=None):
-        """Send context to Gemini for intelligent analysis"""
-        if not self.model:
-            return self.fallback_response()
+    def get_pr_context(self):
+        """Get PR context including diff and files"""
+        if not self.pr_number or self.pr_number.strip() == "":
+            return None
             
         try:
+            pr_num = int(self.pr_number)
+            pr = self.repo.get_pull(pr_num)
+            
+            # Get changed files
+            files = []
+            for file in pr.get_files():
+                files.append({
+                    "filename": file.filename,
+                    "status": file.status,
+                    "additions": file.additions,
+                    "deletions": file.deletions,
+                    "patch": file.patch[:2000] if file.patch else None  # Limit patch size
+                })
+            
+            return {
+                "title": pr.title,
+                "body": pr.body or "",
+                "files": files,
+                "base_ref": pr.base.ref,
+                "head_ref": pr.head.ref
+            }
+            
+        except Exception as e:
+            print(f"❌ Error getting PR context: {e}")
+            return None
+
+    def analyze_with_gemini(self, build_logs, pr_context):
+        """Send context to Gemini for intelligent analysis"""
+        if not self.model:
+            return self.get_intelligent_fallback(build_logs, pr_context)
+            
+        try:
+            # Build comprehensive context for Gemini
             context = f"""
-Analyze this CI failure:
+You are an expert CI/CD failure analyst for a Python project. Analyze this build failure and provide specific, actionable feedback.
 
-Build Logs: {json.dumps(build_logs, indent=2)}
-PR Diff: {pr_diff or "Not available"}
+## BUILD FAILURE CONTEXT
 
-Provide a helpful analysis of what went wrong and how to fix it.
-Focus on the specific errors and give actionable advice.
+**Repository:** {self.repository_name}
+**PR Number:** {self.pr_number}
+**Workflow Run:** {self.workflow_run_id}
+
+## FAILED JOBS AND LOGS
+{json.dumps(build_logs, indent=2)}
+
+## PR CONTEXT
+{json.dumps(pr_context, indent=2) if pr_context else "No PR context available"}
+
+## ANALYSIS REQUIREMENTS
+
+1. **Identify the PRIMARY failure cause** (not secondary issues)
+2. **Provide SPECIFIC diagnosis** with exact error messages, line numbers, file names
+3. **Give ACTIONABLE solutions** with exact commands to run
+4. **Explain WHY it failed** and what the contributor should understand
+5. **Be professional but direct** - this is for experienced developers
+
+## RESPONSE FORMAT
+
+Use this exact structure:
+
+🤖 **CI Failure Bot** - Intelligent Analysis
+
+## ❌ [Failure Type] Detected
+
+**Primary Issue:** [One sentence describing the main problem]
+
+**Technical Diagnosis:**
+- [Specific error details with file names, line numbers]
+- [Root cause explanation]
+- [Why this happened]
+
+**Required Actions:**
+```bash
+# [Exact commands to fix the issue]
+[command 1]
+[command 2]
+```
+
+**Files to Check:**
+- `[filename]`: [specific issue in this file]
+- `[filename]`: [specific issue in this file]
+
+**Root Cause:** [Detailed explanation of why this happened and how to prevent it]
+
+**Next Steps:**
+1. [Specific step]
+2. [Specific step]
+3. [Specific step]
+
+---
+*AI-powered analysis by OpenWISP CI Bot*
+
+## IMPORTANT GUIDELINES
+
+- **Be SPECIFIC**: Don't say "fix tests", say "test_addition expects 5 but should expect 4"
+- **Include exact locations**: File names, line numbers, function names
+- **Provide working commands**: Test them mentally before suggesting
+- **Explain the WHY**: Help developers understand, don't just give commands
+- **Focus on PRIMARY issue**: If multiple things fail, prioritize the root cause
+
+Analyze the failure now:
 """
             
-            print("🧠 Sending to Gemini AI for analysis...")
+            print("🧠 Sending comprehensive context to Gemini AI...")
             response = self.model.generate_content(context)
-            print("✅ Got AI response")
+            print("✅ Got intelligent AI response")
             return response.text
             
         except Exception as e:
             print(f"❌ Gemini API error: {e}")
-            return self.fallback_response()
+            return self.get_intelligent_fallback(build_logs, pr_context)
 
-    def fallback_response(self):
-        """Fallback response if Gemini fails"""
-        return """
-🤖 **CI Failure Bot** - Analysis Complete
+    def get_intelligent_fallback(self, build_logs, pr_context):
+        """Intelligent fallback analysis when Gemini is not available"""
+        
+        # Analyze the logs to determine failure type
+        all_logs = " ".join([log.get("logs", "") for log in build_logs])
+        
+        # Detect specific failure patterns
+        if "AssertionError" in all_logs or "FAILED" in all_logs:
+            return self.analyze_test_failures(build_logs, pr_context)
+        elif "flake8" in all_logs or "black --check" in all_logs or "isort --check" in all_logs:
+            return self.analyze_formatting_failures(build_logs, pr_context)
+        elif "ModuleNotFoundError" in all_logs or "ImportError" in all_logs:
+            return self.analyze_import_failures(build_logs, pr_context)
+        else:
+            return self.analyze_generic_failures(build_logs, pr_context)
 
-## ❌ Build Failed
+    def analyze_test_failures(self, build_logs, pr_context):
+        """Specific analysis for test failures"""
+        failed_tests = []
+        assertion_errors = []
+        
+        for log in build_logs:
+            logs = log.get("logs", "")
+            # Extract specific test failures
+            lines = logs.split("\n")
+            for i, line in enumerate(lines):
+                if "FAILED" in line and "::" in line:
+                    failed_tests.append(line.strip())
+                if "AssertionError" in line and i < len(lines) - 1:
+                    assertion_errors.append(f"{line.strip()} -> {lines[i+1].strip()}")
+        
+        test_files = []
+        if pr_context and pr_context.get("files"):
+            test_files = [f["filename"] for f in pr_context["files"] if f["filename"].startswith("test_")]
+        
+        return f"""🤖 **CI Failure Bot** - Test Failure Analysis
 
-The automated AI analysis detected build failures. Here's what you can do:
+## ❌ Unit Test Failures Detected
 
-**Common Solutions:**
-- **For test failures**: Run `python -m pytest -v` locally to see specific errors
-- **For formatting issues**: Run `black .` and `isort .` to fix code style
-- **For import errors**: Check dependencies and install missing packages
+**Primary Issue:** Test assertions are failing due to incorrect expected values
+
+**Technical Diagnosis:**
+- **Failed Tests:** {len(failed_tests)} test(s) failing
+- **Test Files:** {', '.join(test_files) if test_files else 'Multiple test files'}
+- **Error Type:** AssertionError - expected values don't match actual results
+- **Root Cause:** Test expectations are incorrect or implementation has bugs
+
+**Specific Failures:**
+{chr(10).join(f"- {test}" for test in failed_tests[:5]) if failed_tests else "- Check logs for specific test names"}
+
+**Assertion Errors Found:**
+{chr(10).join(f"- {error}" for error in assertion_errors[:3]) if assertion_errors else "- Review test output for assertion details"}
+
+**Required Actions:**
+```bash
+# Run tests locally to see detailed output
+python -m pytest {' '.join(test_files)} -v
+
+# For specific test debugging
+python -m pytest {test_files[0] if test_files else 'test_*.py'} -v -s
+
+# Check test logic and fix assertions
+# Review expected vs actual values in failing tests
+```
+
+**Files to Check:**
+{chr(10).join(f"- `{f}`: Review test assertions and expected values" for f in test_files) if test_files else "- Check all test files for incorrect assertions"}
+
+**Root Cause:** The tests expect different values than what the code produces. Either:
+1. The test expectations are wrong (fix the assertions)
+2. The implementation has bugs (fix the code logic)
+3. Test data setup is incorrect (check test fixtures)
 
 **Next Steps:**
-1. Check the CI logs above for specific error details
-2. Run the suggested commands locally
-3. Fix the issues and push again
+1. Run the tests locally with `-v` flag to see exact failures
+2. Compare expected vs actual values in each failing assertion
+3. Determine if the test or the code needs fixing
+4. Update assertions or fix implementation accordingly
+5. Ensure all tests pass before pushing
 
-*This analysis was generated automatically. The bot is working correctly!* ✅
-"""
+---
+*Intelligent analysis by OpenWISP CI Bot*"""
+
+    def analyze_formatting_failures(self, build_logs, pr_context):
+        """Specific analysis for code formatting failures"""
+        formatting_issues = []
+        tools_failed = []
+        
+        for log in build_logs:
+            logs = log.get("logs", "")
+            if "flake8" in logs:
+                tools_failed.append("flake8")
+            if "black --check" in logs:
+                tools_failed.append("black")
+            if "isort --check" in logs:
+                tools_failed.append("isort")
+            
+            # Extract specific formatting errors
+            lines = logs.split("\n")
+            for line in lines:
+                if any(code in line for code in ["E", "W", "F"]) and ":" in line:
+                    formatting_issues.append(line.strip())
+        
+        python_files = []
+        if pr_context and pr_context.get("files"):
+            python_files = [f["filename"] for f in pr_context["files"] if f["filename"].endswith(".py")]
+        
+        return f"""🤖 **CI Failure Bot** - Code Quality Analysis
+
+## ❌ Code Formatting Violations Detected
+
+**Primary Issue:** Code doesn't follow Python style guidelines (PEP 8)
+
+**Technical Diagnosis:**
+- **Failed Tools:** {', '.join(tools_failed) if tools_failed else 'Code quality checks'}
+- **Files Affected:** {', '.join(python_files) if python_files else 'Multiple Python files'}
+- **Issue Type:** Style violations, formatting inconsistencies
+- **Standard:** PEP 8 Python style guide compliance required
+
+**Specific Violations Found:**
+{chr(10).join(f"- {issue}" for issue in formatting_issues[:8]) if formatting_issues else "- Check logs for specific style violations"}
+
+**Required Actions:**
+```bash
+# Fix all formatting issues automatically
+black {' '.join(python_files) if python_files else '.'}
+isort {' '.join(python_files) if python_files else '.'}
+
+# Check for remaining issues
+flake8 {' '.join(python_files) if python_files else '.'} --max-line-length=88
+
+# Commit the formatting fixes
+git add .
+git commit -m "Fix code formatting (black, isort, flake8)"
+```
+
+**Files to Check:**
+{chr(10).join(f"- `{f}`: Apply formatting tools" for f in python_files) if python_files else "- All Python files need formatting"}
+
+**Root Cause:** The code was written or edited without running the formatting tools. OpenWISP requires strict adherence to PEP 8 style guidelines for code consistency and readability.
+
+**Next Steps:**
+1. Run `black .` to fix line length and formatting
+2. Run `isort .` to organize imports properly  
+3. Run `flake8 . --max-line-length=88` to check for remaining issues
+4. Commit the formatting changes
+5. Push to retrigger CI checks
+
+**Prevention:** Set up pre-commit hooks or IDE formatting to avoid future issues.
+
+---
+*Intelligent analysis by OpenWISP CI Bot*"""
+
+    def analyze_import_failures(self, build_logs, pr_context):
+        """Specific analysis for import/dependency failures"""
+        import_errors = []
+        missing_modules = []
+        
+        for log in build_logs:
+            logs = log.get("logs", "")
+            lines = logs.split("\n")
+            for line in lines:
+                if "ModuleNotFoundError" in line or "ImportError" in line:
+                    import_errors.append(line.strip())
+                if "No module named" in line:
+                    # Extract module name
+                    parts = line.split("'")
+                    if len(parts) >= 2:
+                        missing_modules.append(parts[1])
+        
+        python_files = []
+        if pr_context and pr_context.get("files"):
+            python_files = [f["filename"] for f in pr_context["files"] if f["filename"].endswith(".py")]
+        
+        return f"""🤖 **CI Failure Bot** - Import Error Analysis
+
+## ❌ Import/Dependency Errors Detected
+
+**Primary Issue:** Missing dependencies or incorrect import statements
+
+**Technical Diagnosis:**
+- **Error Type:** ModuleNotFoundError/ImportError
+- **Missing Modules:** {', '.join(set(missing_modules)) if missing_modules else 'Check error details'}
+- **Files Affected:** {', '.join(python_files) if python_files else 'Multiple Python files'}
+- **Cause:** Dependencies not installed or import paths incorrect
+
+**Specific Import Errors:**
+{chr(10).join(f"- {error}" for error in import_errors[:5]) if import_errors else "- Check logs for specific import failures"}
+
+**Required Actions:**
+```bash
+# Check if modules are installed
+python -c "import {missing_modules[0] if missing_modules else 'module_name'}"
+
+# Install missing dependencies
+pip install {' '.join(set(missing_modules)) if missing_modules else 'package_name'}
+
+# Verify imports work
+python -m py_compile {' '.join(python_files) if python_files else 'your_file.py'}
+
+# Check requirements file
+pip install -r requirements.txt
+```
+
+**Files to Check:**
+{chr(10).join(f"- `{f}`: Review import statements" for f in python_files) if python_files else "- Check all Python files for import issues"}
+
+**Root Cause:** Either:
+1. **Missing dependencies**: Required packages not installed in CI environment
+2. **Typos in imports**: Misspelled module or package names  
+3. **Wrong import paths**: Incorrect relative/absolute import statements
+4. **Missing requirements**: Dependencies not listed in requirements.txt
+
+**Next Steps:**
+1. Verify all import statements are correct (no typos)
+2. Check if missing modules should be installed or are misspelled
+3. Add missing dependencies to requirements.txt if needed
+4. Test imports locally: `python -c "import module_name"`
+5. Ensure all dependencies are properly declared
+
+**Prevention:** Always test imports locally and keep requirements.txt updated.
+
+---
+*Intelligent analysis by OpenWISP CI Bot*"""
+
+    def analyze_generic_failures(self, build_logs, pr_context):
+        """Generic analysis for other types of failures"""
+        return f"""🤖 **CI Failure Bot** - Build Failure Analysis
+
+## ❌ Build Failure Detected
+
+**Primary Issue:** CI pipeline failed - requires investigation
+
+**Technical Diagnosis:**
+- **Failed Jobs:** {', '.join([log.get('job_name', 'Unknown') for log in build_logs])}
+- **Status:** Multiple components failed during build process
+- **Context:** Check detailed logs for specific error messages
+
+**Required Actions:**
+```bash
+# Check the specific error messages in CI logs above
+# Common debugging steps:
+
+# For Python issues
+python -m py_compile your_files.py
+
+# For dependency issues  
+pip install -r requirements.txt
+
+# For test issues
+python -m pytest -v
+
+# For formatting issues
+black . && isort . && flake8 .
+```
+
+**Root Cause:** The build failed due to issues that require manual investigation. Check the detailed logs above for specific error messages and stack traces.
+
+**Next Steps:**
+1. Review the complete CI logs above for error details
+2. Identify the specific failure point (compilation, tests, dependencies, etc.)
+3. Reproduce the issue locally using the same commands
+4. Fix the underlying issue based on error messages
+5. Test locally before pushing again
+
+**Need Help?** If the error is unclear, please:
+- Share the specific error message
+- Check similar issues in the project's issue tracker
+- Ask maintainers for guidance on complex build problems
+
+---
+*Intelligent analysis by OpenWISP CI Bot*"""
 
     def post_comment(self, message):
         """Post or update comment on PR"""
@@ -149,15 +534,15 @@ The automated AI analysis detected build failures. Here's what you can do:
             pr_num = int(self.pr_number)
             pr = self.repo.get_pull(pr_num)
             
-            # Add timestamp and marker
+            # Add timestamp and marker for tracking
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            marker = f"<!-- ci-failure-bot-{timestamp} -->"
-            message_with_marker = f"{marker}\n{message}\n\n*Posted at: {timestamp}*"
+            marker = f"<!-- ci-failure-bot-intelligent-{timestamp} -->"
+            message_with_marker = f"{marker}\n{message}"
             
-            # Always create new comment for testing
+            # Always create new comment to show latest analysis
             pr.create_issue_comment(message_with_marker)
-            print(f"✅ Posted comment to PR #{pr_num}")
+            print(f"✅ Posted intelligent analysis to PR #{pr_num}")
             
         except Exception as e:
             print(f"❌ Error posting comment: {e}")
@@ -167,43 +552,53 @@ The automated AI analysis detected build failures. Here's what you can do:
     def run(self):
         """Main execution flow"""
         try:
-            print("🚀 Starting CI Failure Bot analysis...")
+            print("🚀 Starting intelligent CI failure analysis...")
             
-            # Get build logs
+            # Get comprehensive context
             build_logs = self.get_build_logs()
+            pr_context = self.get_pr_context()
             
             if not build_logs:
-                print("⚠️ No failed jobs found")
+                print("⚠️ No failed jobs found - nothing to analyze")
                 return
                 
-            # Get AI analysis
-            print("🔍 Analyzing failures...")
-            ai_response = self.analyze_with_gemini(build_logs)
+            print(f"🔍 Analyzing {len(build_logs)} failed jobs...")
             
-            # Post comment
-            print("💬 Posting comment...")
-            self.post_comment(ai_response)
+            # Get intelligent analysis (AI or smart fallback)
+            analysis = self.analyze_with_gemini(build_logs, pr_context)
             
-            print("🎉 CI Failure Bot completed successfully!")
+            # Post the analysis
+            print("💬 Posting intelligent analysis...")
+            self.post_comment(analysis)
+            
+            print("🎉 Intelligent CI analysis completed successfully!")
             
         except Exception as e:
             print(f"💥 CRITICAL ERROR: {e}")
             import traceback
             traceback.print_exc()
             
-            # Try to post error comment
+            # Try to post error report
             try:
-                error_message = f"""
-🤖 **CI Failure Bot** - Error Report
+                error_message = f"""🤖 **CI Failure Bot** - System Error
 
-❌ **Bot encountered an error while analyzing the failure:**
+❌ **The bot encountered a technical error while analyzing this failure.**
 
+**Error Details:**
 ```
 {str(e)}
 ```
 
-Please check the workflow logs for more details. The bot infrastructure is working but encountered an issue during analysis.
-"""
+**Manual Steps:**
+Please check the CI logs above for specific error messages and:
+1. Review failed job outputs for error details
+2. Run tests/checks locally to reproduce issues  
+3. Fix identified problems and push again
+
+The bot infrastructure is being improved to handle this case better.
+
+---
+*Error reported at: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*"""
                 self.post_comment(error_message)
             except:
                 pass

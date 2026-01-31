@@ -42,8 +42,8 @@ def main():
         print(f"✅ Connected to PR: {pr.title}")
         
         # Simple success message for now
-        message = """<!-- ci-failure-bot-comment -->
-🤖 **CI Failure Bot** (AI-powered) - WORKING!
+        message = f"""<!-- ci-failure-bot-comment -->
+🤖 **CI Failure Bot** (AI-powered) - UPDATED at {__import__('datetime').datetime.now()}
 
 ## CI Build Failed - Code Quality Issues
 
@@ -51,7 +51,7 @@ def main():
 
 **Technical Diagnosis:**
 - **flake8 violations**: Multiple PEP 8 style violations detected
-- **Indentation errors**: Inconsistent spacing and indentation
+- **Indentation errors**: Inconsistent spacing and indentation  
 - **Line length**: Lines exceed 88 character limit
 - **Import formatting**: Missing proper spacing
 
@@ -79,7 +79,7 @@ flake8 bad_formatting.py --max-line-length=88
 2. Commit changes: `git add . && git commit -m "Fix code formatting"`
 3. Push to retrigger CI checks
 
-The bot is now working correctly and analyzing your code!
+✅ Bot is working and will update this comment on each run!
 """
         
         # Post or update comment

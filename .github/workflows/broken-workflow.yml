@@ -1,0 +1,27 @@
+name: Broken YAML Workflow
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  yaml-syntax-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Test YAML parsing
+        run: |
+          # This will fail due to YAML syntax errors in config files
+          python -c "import yaml; yaml.safe_load(open('.github/config/broken-config.yml'))"
+          
+  invalid-yaml-job:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Invalid step
+      run: echo "This job has YAML indentation errors"
+      # Missing proper indentation above
+      invalid_key_without_dash: "This will cause YAML parsing to fail"
+      another-broken-key
+        nested_without_colon "invalid"

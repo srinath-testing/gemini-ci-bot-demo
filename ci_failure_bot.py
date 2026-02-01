@@ -4,12 +4,21 @@
 import io
 import json
 import os
+import re
 import sys
 import zipfile
 
 import google.generativeai as genai
 import requests
 from github import Github, GithubException
+
+
+def strip_required_actions(text: str) -> str:
+    """
+    Remove ANY 'Required Actions' section produced by Gemini.
+    """
+    pattern = r"\*\*Required Actions:\*\*.*?(?=\n\*\*|\Z)"
+    return re.sub(pattern, "", text, flags=re.DOTALL).strip()
 
 
 class CIFailureBot:
@@ -357,6 +366,9 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
             print("Analyzing failure with Gemini AI...")
             # Get AI analysis (diagnosis only)
             analysis = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
+            
+            # 🚫 Strip Gemini's Required Actions completely
+            analysis = strip_required_actions(analysis)
             
             # Compose final message with authoritative OpenWISP QA instructions
             from datetime import datetime

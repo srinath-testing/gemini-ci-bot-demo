@@ -336,22 +336,28 @@ Analyze the failure and provide your response:
             text = f"{text.strip()}\n{qa_block}"
         return text
 
-    def enforce_openwisp_qa(self, message):
-        """Hard enforcement: remove raw linters, ensure OpenWISP QA workflow"""
-        banned = ("black", "flake8", "isort")
-        lines = [
-            line for line in message.splitlines()
-            if not any(b in line for b in banned)
-        ]
-        
+    def normalize_qa_instructions(self, text):
+        """Ensure OpenWISP QA workflow is used, remove raw linter references"""
+        # Remove mentions of raw linters
+        banned_tools = ["black", "flake8", "isort"]
+        for tool in banned_tools:
+            # Remove standalone tool mentions and command examples
+            text = text.replace(f"`{tool}`", "`openwisp-qa-format`")
+            text = text.replace(f" {tool} ", " openwisp-qa-format ")
+            text = text.replace(f"Run {tool}", "Run openwisp-qa-format")
+            text = text.replace(f"run {tool}", "run openwisp-qa-format")
+        # Ensure OpenWISP QA workflow is always present
         qa_block = """
 **OpenWISP QA Workflow:**
 - Install QA tools: `pip install -e .[qa]`
-- Run checks: `./run-qa-checks`
-- Auto-format code: `openwisp-qa-format`
+- Run `./run-qa-checks` to see all issues
+- Fix formatting with `openwisp-qa-format`
+- Run `./runtests` locally to verify all tests pass
 """
-        
-        return "\n".join(lines).strip() + "\n\n" + qa_block
+        # Add QA block if not already present
+        if "pip install -e .[qa]" not in text:
+            text = f"{text.strip()}\n{qa_block}"
+        return text
 
     def fallback_response(self):
         """Fallback response if Gemini fails"""
@@ -367,7 +373,7 @@ The automated analysis is temporarily unavailable. Please check the CI logs abov
 4. Run `./runtests` locally to verify all tests pass
 
 **Common Issues:**
-- Code style violations (black, flake8, isort)
+- Code style violations detected by OpenWISP QA checks
 - Missing or failing tests
 - Import/dependency problems
 
@@ -438,10 +444,8 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
             print("Analyzing failure with Gemini AI...")
             # Get AI analysis
             ai_response = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
-            # CRITICAL: Enforce OpenWISP QA workflow (single enforcement point)
-            final_response = self.enforce_openwisp_qa(ai_response)
             # Post intelligent comment
-            self.post_comment(final_response)
+            self.post_comment(ai_response)
             print("CI Failure Bot completed successfully")
         except Exception as e:
             print(f"CRITICAL ERROR in CI Failure Bot: {e}")

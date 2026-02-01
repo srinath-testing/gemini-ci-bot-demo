@@ -2,27 +2,34 @@ name: CI Failure Bot
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
-  issues: write
-  pull-requests: write
   contents: read
+  pull-requests: write   # 🚨 REQUIRED
+  issues: write          # 🚨 REQUIRED
 
 jobs:
   ci-failure-bot:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
+      
+      - name: Install deps
         run: |
-          pip install requests PyGithub google-generativeai
+          pip install requests PyGithub
+      
       - name: Run CI failure bot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python ci_failure_bot.py || true
+          python ci_failure_bot.py

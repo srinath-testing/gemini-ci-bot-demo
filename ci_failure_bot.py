@@ -207,21 +207,10 @@ class CIFailureBot:
             pr_diff_json = json.dumps(pr_diff, indent=2)
         else:
             pr_diff_json = "No PR associated"
-        # Gemini prompt with EXPLICIT OpenWISP QA commands
+        # Gemini prompt - DIAGNOSIS ONLY, NO COMMANDS
         context = f"""
-### CRITICAL: YOU MUST USE OPENWISP QA COMMANDS ONLY
-
-For ANY code quality issues, you MUST recommend these EXACT commands:
-1. pip install -e .[qa]
-2. ./run-qa-checks
-3. openwisp-qa-format
-
-DO NOT recommend: black, isort, flake8 individually
-ALWAYS use the OpenWISP QA workflow above.
-
 ### ROLE
-You are the "Automated Maintainer Gatekeeper." Your goal is to analyze Pull Request (PR)
-build failures and provide direct, technically accurate, and no-nonsense feedback to contributors.
+You are a CI failure analyst. Your job is to explain WHY the build failed, not HOW to fix it.
 
 ### INPUT CONTEXT PROVIDED
 1. **Build Output/Logs:** {build_logs_json}
@@ -229,78 +218,25 @@ build failures and provide direct, technically accurate, and no-nonsense feedbac
 3. **PR Diff:** {pr_diff_json}
 4. **Project Name:** {project_name}
 5. **Repository:** {repo_url}
-6. **run-qa-checks:** {qa_checks_url}
-7. **runtests:** {runtests_url}
-
-### MANDATORY QA RESPONSE FORMAT
-If you detect code formatting/style issues, respond EXACTLY like this:
-
-**Required Actions:**
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Run `openwisp-qa-format` to automatically fix formatting
-- Run `./runtests` locally to verify all tests pass
 
 ### TASK
-Analyze the provided context to determine why the build failed.
-Categorize the failure and respond according to the "Tone Guidelines" below.
+Analyze the provided context and explain the failure. Be direct and technical.
 
-### PR REQUIREMENTS CHECKLIST
-Before providing feedback, verify these requirements:
-- Does the PR reference any issue? If so, is it correctly mentioned in the commit description?
-- If the PR is a fix, change or feature it must include automated tests or it will be rejected.
-- Does the CI build fail? If yes, report the key reasons to the contributor
-  and if the solution is obvious provide it, if finding the solution is not
-  obvious and requires more than 30% additional computation just report the key reasons.
-- If QA checks are failing, instruct the contributor to install QA tools with
-  `pip install -e .[qa]` and run `./run-qa-checks` to see all issues, then use
-  `openwisp-qa-format` to automatically fix formatting issues. Reference the
-  [openwisp contributing guidelines](https://openwisp.io/docs/stable/developer/contributing.html)
-  for complete setup instructions.
-- Is the PR addressing changes to the user interface? If yes, check if a selenium
-  browser test is present and if the PR description attaches screenshots or screencasts,
-  if not, report this to the user and ask to provide both
-- If this PR adds a new feature or notably changes an existing documented feature,
-  check if documentation updates are present and if not report it
-- Do you detect coderabbitai or copilot reviews asking for changes after the latest commit?
-  If so, ask the user to follow up with those review comments one by one
+### RESPONSE FORMAT
+Provide a clear diagnosis in this format:
 
-### TONE GUIDELINES
-- **Direct & Honest:** Do not use "fluff" or overly polite corporate language.
-- **Firm Standards:** If a PR is low-effort, spammy, or fails to follow basic instructions,
-  state that clearly.
-- **Action-Oriented:** Provide the exact command or file change needed to fix the error,
-  unless the PR is spammy, in which case we should just declare the PR as potential SPAM
-  and ask maintainers to manually review it.
+**Primary Issue:** [One sentence summary]
 
-### RESPONSE STRUCTURE
-1. **Status Summary:** A one-sentence blunt assessment of the failure.
-2. **Technical Diagnosis:**
-   - Identify the specific line/test that failed.
-   - Explain *why* it failed.
-3. **Required Action:** Provide a code block or specific steps the contributor must take.
-4. **Quality Warning (If Applicable):** If the PR appears to be "spam"
-   (e.g., trivial README changes, AI-generated nonsense, or repeated basic errors),
-   include a firm statement that such contributions are a drain on project resources
-   and ping the maintainers asking them for manual review.
+**Technical Diagnosis:**
+- Failed Jobs: [job names]
+- Files Changed: [file names]
+- Error Type: [type of error]
+- Root Cause: [why it failed]
 
-### EXAMPLE RESPONSE STYLE
-The build failed because you neglected to update the test suite to match your logic changes.
+### CRITICAL RULE
+DO NOT include any commands, tools, or fix instructions. Only explain the failure and its cause.
 
-**Required Actions:**
-- Update tests/logic_test.py to cover your new functionality
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Run `openwisp-qa-format` to automatically fix formatting
-- Run `./runtests` locally to verify all tests pass
-
-**Missing Requirements:**
-- [ ] Automated tests for new functionality
-- [ ] Code follows OpenWISP style guidelines (use openwisp-qa-format)
-
-We prioritize high-quality, ready-to-merge code. Please ensure you run local QA checks before pushing.
-
-Analyze the failure and provide your response:
+Analyze the failure and provide your diagnosis:
 """
         try:
             # Check if Gemini is available
@@ -313,59 +249,14 @@ Analyze the failure and provide your response:
             print(f"Error calling Gemini API: {e}")
             return self.fallback_response()
 
-    def normalize_qa_instructions(self, text):
-        """AGGRESSIVE: Replace entire Required Actions section with OpenWISP QA workflow"""
-        import re
-        
-        # If text contains raw linters, completely replace Required Actions section
-        if any(tool in text.lower() for tool in ["black", "flake8", "isort"]):
-            # Find and replace the entire Required Actions section
-            pattern = r'(Required Actions:.*?)(\n\*\*|\n---|\nAnalysis based on|\Z)'
-            
-            openwisp_actions = """Required Actions:
+    def openwisp_qa_block(self):
+        return """
+**Required Actions:**
 - Install QA tools: `pip install -e .[qa]`
 - Run `./run-qa-checks` to see all issues
-- Fix formatting with `openwisp-qa-format`
-- Run `./runtests` locally to verify all tests pass"""
-            
-            # Replace the section
-            new_text = re.sub(pattern, openwisp_actions + r'\2', text, flags=re.DOTALL)
-            return new_text
-        
-        # If no raw linters, ensure OpenWISP QA block exists
-        if "pip install -e .[qa]" not in text:
-            qa_block = """
-**OpenWISP QA Workflow:**
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Fix formatting with `openwisp-qa-format`
+- Run `openwisp-qa-format` to automatically fix formatting
 - Run `./runtests` locally to verify all tests pass
 """
-            text = f"{text.strip()}\n{qa_block}"
-        
-        return text
-
-    def force_openwisp_qa_only(self, message):
-        """
-        Final enforcement layer.
-        Guarantees only OpenWISP QA commands are suggested.
-        """
-        lines = message.splitlines()
-        filtered = []
-        
-        for line in lines:
-            lowered = line.lower()
-            if any(tool in lowered for tool in ("black ", "flake8", "isort")):
-                continue
-            filtered.append(line)
-        
-        filtered.append("")
-        filtered.append("**Required Actions:**")
-        filtered.append("- Install QA tools: `pip install -e .[qa]`")
-        filtered.append("- Run `./run-qa-checks` to see all issues")
-        filtered.append("- Run `openwisp-qa-format` to automatically fix formatting")
-        
-        return "\n".join(filtered)
 
     def fallback_response(self):
         """Fallback response if Gemini fails"""
@@ -450,12 +341,23 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
                 print("No build logs found")
                 return
             print("Analyzing failure with Gemini AI...")
-            # Get AI analysis
-            ai_response = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
-            # 🔒 FINAL, NON-NEGOTIABLE ENFORCEMENT
-            ai_response = self.force_openwisp_qa_only(ai_response)
+            # Get AI analysis (diagnosis only)
+            analysis = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
+            
+            # Compose final message with authoritative OpenWISP QA instructions
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            final_message = f"""🤖 CI Failure Bot - Code Quality Analysis ({timestamp})
+
+{analysis}
+
+{self.openwisp_qa_block()}
+
+Analysis based on actual job failures - {timestamp}"""
+            
             # Post intelligent comment
-            self.post_comment(ai_response)
+            self.post_comment(final_message)
             print("CI Failure Bot completed successfully")
         except Exception as e:
             print(f"CRITICAL ERROR in CI Failure Bot: {e}")

@@ -308,56 +308,64 @@ Analyze the failure and provide your response:
                 return self.fallback_response()
             # Use Gemini client API
             response = self.model.generate_content(context)
-            return self.normalize_qa_instructions(response.text)
+            return response.text
         except (ValueError, ConnectionError, Exception) as e:
             print(f"Error calling Gemini API: {e}")
             return self.fallback_response()
 
     def normalize_qa_instructions(self, text):
-        """Ensure OpenWISP QA workflow is used, remove raw linter references"""
-        # Remove mentions of raw linters
-        banned_tools = ["black", "flake8", "isort"]
-        for tool in banned_tools:
-            # Remove standalone tool mentions and command examples
-            text = text.replace(f"`{tool}`", "`openwisp-qa-format`")
-            text = text.replace(f" {tool} ", " openwisp-qa-format ")
-            text = text.replace(f"Run {tool}", "Run openwisp-qa-format")
-            text = text.replace(f"run {tool}", "run openwisp-qa-format")
-        # Ensure OpenWISP QA workflow is always present
-        qa_block = """
+        """AGGRESSIVE: Replace entire Required Actions section with OpenWISP QA workflow"""
+        import re
+        
+        # If text contains raw linters, completely replace Required Actions section
+        if any(tool in text.lower() for tool in ["black", "flake8", "isort"]):
+            # Find and replace the entire Required Actions section
+            pattern = r'(Required Actions:.*?)(\n\*\*|\n---|\nAnalysis based on|\Z)'
+            
+            openwisp_actions = """Required Actions:
+- Install QA tools: `pip install -e .[qa]`
+- Run `./run-qa-checks` to see all issues
+- Fix formatting with `openwisp-qa-format`
+- Run `./runtests` locally to verify all tests pass"""
+            
+            # Replace the section
+            new_text = re.sub(pattern, openwisp_actions + r'\2', text, flags=re.DOTALL)
+            return new_text
+        
+        # If no raw linters, ensure OpenWISP QA block exists
+        if "pip install -e .[qa]" not in text:
+            qa_block = """
 **OpenWISP QA Workflow:**
 - Install QA tools: `pip install -e .[qa]`
 - Run `./run-qa-checks` to see all issues
 - Fix formatting with `openwisp-qa-format`
 - Run `./runtests` locally to verify all tests pass
 """
-        # Add QA block if not already present
-        if "pip install -e .[qa]" not in text:
             text = f"{text.strip()}\n{qa_block}"
+        
         return text
 
-    def normalize_qa_instructions(self, text):
-        """Ensure OpenWISP QA workflow is used, remove raw linter references"""
-        # Remove mentions of raw linters
-        banned_tools = ["black", "flake8", "isort"]
-        for tool in banned_tools:
-            # Remove standalone tool mentions and command examples
-            text = text.replace(f"`{tool}`", "`openwisp-qa-format`")
-            text = text.replace(f" {tool} ", " openwisp-qa-format ")
-            text = text.replace(f"Run {tool}", "Run openwisp-qa-format")
-            text = text.replace(f"run {tool}", "run openwisp-qa-format")
-        # Ensure OpenWISP QA workflow is always present
-        qa_block = """
-**OpenWISP QA Workflow:**
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Fix formatting with `openwisp-qa-format`
-- Run `./runtests` locally to verify all tests pass
-"""
-        # Add QA block if not already present
-        if "pip install -e .[qa]" not in text:
-            text = f"{text.strip()}\n{qa_block}"
-        return text
+    def force_openwisp_qa_only(self, message):
+        """
+        Final enforcement layer.
+        Guarantees only OpenWISP QA commands are suggested.
+        """
+        lines = message.splitlines()
+        filtered = []
+        
+        for line in lines:
+            lowered = line.lower()
+            if any(tool in lowered for tool in ("black ", "flake8", "isort")):
+                continue
+            filtered.append(line)
+        
+        filtered.append("")
+        filtered.append("**Required Actions:**")
+        filtered.append("- Install QA tools: `pip install -e .[qa]`")
+        filtered.append("- Run `./run-qa-checks` to see all issues")
+        filtered.append("- Run `openwisp-qa-format` to automatically fix formatting")
+        
+        return "\n".join(filtered)
 
     def fallback_response(self):
         """Fallback response if Gemini fails"""
@@ -444,6 +452,8 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
             print("Analyzing failure with Gemini AI...")
             # Get AI analysis
             ai_response = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
+            # 🔒 FINAL, NON-NEGOTIABLE ENFORCEMENT
+            ai_response = self.force_openwisp_qa_only(ai_response)
             # Post intelligent comment
             self.post_comment(ai_response)
             print("CI Failure Bot completed successfully")

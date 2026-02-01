@@ -330,24 +330,31 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
 
     def enforce_openwisp_qa(self, text):
         """FINAL enforcement: ensure OpenWISP QA workflow, remove raw linters"""
-        # Remove all mentions of raw linters
-        banned_tools = ["black", "flake8", "isort"]
-        for tool in banned_tools:
-            # Remove tool mentions in various formats
-            text = text.replace(f"`{tool}`", "")
-            text = text.replace(f" {tool} ", " ")
-            text = text.replace(f"Run {tool}", "Run openwisp-qa-format")
-            text = text.replace(f"run {tool}", "run openwisp-qa-format")
-            text = text.replace(f"{tool} ", "")
+        # AGGRESSIVE removal of raw linter sections
+        import re
+        
+        # Remove entire lines containing raw linters
+        lines = text.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            # Skip lines that contain raw linter commands
+            if any(tool in line.lower() for tool in ['black', 'flake8', 'isort']):
+                continue
+            filtered_lines.append(line)
+        
+        # Rebuild text without raw linter lines
+        clean_text = '\n'.join(filtered_lines)
+        
         # Always append OpenWISP QA workflow
         qa_block = """
 **OpenWISP QA Workflow:**
 - Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
+- Run `./run-qa-checks` to see all issues  
 - Fix formatting with `openwisp-qa-format`
 - Run `./runtests` locally to verify all tests pass
 """
-        return f"{text.strip()}\n{qa_block}"
+        return f"{clean_text.strip()}\n{qa_block}"
 
     def post_comment(self, message):
         """Post or update comment on PR"""

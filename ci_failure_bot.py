@@ -264,6 +264,7 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
             if self.workflow_run_id:
                 try:
                     workflow_run = self.repo.get_workflow_run(int(self.workflow_run_id))
+                    print("DEBUG pull_requests:", workflow_run.pull_requests)  # DECISIVE DEBUG LINE
                     if (
                         workflow_run.actor
                         and "dependabot" in workflow_run.actor.login.lower()

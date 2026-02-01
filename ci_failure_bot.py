@@ -261,12 +261,15 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
         """Main execution flow"""
         try:
             print("CI Failure Bot starting - AI-powered analysis")
+            print(f"DEBUG: WORKFLOW_RUN_ID = {self.workflow_run_id}")
+            print(f"DEBUG: PR_NUMBER = {self.pr_number}")
             
             # For demo without WORKFLOW_RUN_ID, use fallback
             if not self.workflow_run_id:
                 print("Demo mode: No WORKFLOW_RUN_ID provided, using fallback analysis")
                 if not self.pr_number or self.pr_number.strip() == "":
                     print("No PR number, cannot post comment")
+                    print(f"DEBUG: PR_NUMBER value: '{self.pr_number}'")
                     return
                 
                 # Simple demo analysis
@@ -293,6 +296,7 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
 Analysis based on demo formatting failure - {timestamp}"""
                 
                 # Post comment
+                print(f"DEBUG: posting comment to PR_NUMBER={self.pr_number}")
                 self.post_comment(final_message)
                 print("CI Failure Bot completed successfully (demo mode)")
                 return

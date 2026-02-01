@@ -257,6 +257,15 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
         except (GithubException, ValueError) as e:
             print(f"Error posting comment: {e}")
 
+    def openwisp_qa_block(self):
+        return """
+**Required Actions:**
+- Install QA tools: `pip install -e .[qa]`
+- Run `./run-qa-checks` to see all issues
+- Run `openwisp-qa-format` to automatically fix formatting
+- Run `./runtests` locally to verify all tests pass
+"""
+
     def run(self):
         """Main execution flow"""
         try:

@@ -28,7 +28,7 @@ class CIFailureBot:
             if not self.repository_name:
                 missing.append("REPOSITORY")
             print(f"Missing required environment variables: {', '.join(missing)}")
-            sys.exit(1)
+            return  # Don't fail the job, just exit gracefully
         self.github = Github(auth=Github.Auth.Token(self.github_token))
         self.repo = self.github.get_repo(self.repository_name)
         # Force fallback mode for demo (no Gemini dependency)
@@ -331,7 +331,8 @@ Analysis based on demo formatting failure - {timestamp}"""
             print(f"CRITICAL ERROR in CI Failure Bot: {e}")
             import traceback
             traceback.print_exc()
-            sys.exit(1)
+            # NEVER fail the job - comments are side-effects
+            return
 
 
 if __name__ == "__main__":

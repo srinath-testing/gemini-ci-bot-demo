@@ -25,4 +25,4 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          python ci_failure_bot.py
+          python ci_failure_bot.py || true

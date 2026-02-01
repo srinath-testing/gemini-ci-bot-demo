@@ -29,7 +29,7 @@ class CIFailureBot:
                 missing.append("REPOSITORY")
             print(f"Missing required environment variables: {', '.join(missing)}")
             return  # Don't fail the job, just exit gracefully
-        self.github = Github(auth=Github.Auth.Token(self.github_token))
+        self.github = Github(self.github_token)
         self.repo = self.github.get_repo(self.repository_name)
         # Force fallback mode for demo (no Gemini dependency)
         print("Demo mode: Using fallback responses only")

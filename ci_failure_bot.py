@@ -17,8 +17,26 @@ def strip_required_actions(text: str) -> str:
     """
     Remove ANY 'Required Actions' section produced by Gemini.
     """
-    pattern = r"\*\*Required Actions:\*\*.*?(?=\n\*\*|\Z)"
-    return re.sub(pattern, "", text, flags=re.DOTALL).strip()
+    # Match multiple patterns for Required Actions
+    patterns = [
+        r"\*\*Required Actions:\*\*.*?(?=\n\*\*|\Z)",  # **Required Actions:**
+        r"Required Actions:.*?(?=\n\n|\Z)",            # Required Actions:
+        r"# Fix formatting.*?(?=\n\n|\Z)",             # # Fix formatting
+        r"```bash.*?```",                              # Code blocks with commands
+    ]
+    
+    result = text
+    for pattern in patterns:
+        result = re.sub(pattern, "", result, flags=re.DOTALL)
+    
+    # Also remove any lines containing raw linter commands
+    lines = result.split('\n')
+    filtered_lines = []
+    for line in lines:
+        if not any(tool in line.lower() for tool in ['black ', 'flake8', 'isort ']):
+            filtered_lines.append(line)
+    
+    return '\n'.join(filtered_lines).strip()
 
 
 class CIFailureBot:
@@ -31,24 +49,22 @@ class CIFailureBot:
         if not all(
             [
                 self.github_token,
-                self.workflow_run_id,
                 self.repository_name,
             ]
         ):
             missing = []
             if not self.github_token:
                 missing.append("GITHUB_TOKEN")
-            if not self.workflow_run_id:
-                missing.append("WORKFLOW_RUN_ID")
             if not self.repository_name:
                 missing.append("REPOSITORY")
             print(f"Missing required environment variables: {', '.join(missing)}")
             sys.exit(1)
-        try:
-            self.workflow_run_id = int(self.workflow_run_id)
-        except ValueError:
-            print("Invalid WORKFLOW_RUN_ID: must be numeric")
-            sys.exit(1)
+        if self.workflow_run_id:
+            try:
+                self.workflow_run_id = int(self.workflow_run_id)
+            except ValueError:
+                print("Invalid WORKFLOW_RUN_ID: must be numeric")
+                sys.exit(1)
         self.github = Github(self.github_token)
         self.repo = self.github.get_repo(self.repository_name)
         # Initialize Gemini client with new API (optional)
@@ -62,6 +78,8 @@ class CIFailureBot:
 
     def get_build_logs(self):
         """Get actual build logs and error output from failed jobs"""
+        if not self.workflow_run_id:
+            return [{"job_name": "demo", "logs": "Demo formatting failure for testing"}]
         try:
             workflow_run = self.repo.get_workflow_run(self.workflow_run_id)
             jobs = workflow_run.jobs()
@@ -203,6 +221,8 @@ class CIFailureBot:
 
     def get_workflow_yaml(self):
         """Get the workflow YAML configuration"""
+        if not self.workflow_run_id:
+            return "Demo workflow for testing CI failure bot"
         try:
             workflow_run = self.repo.get_workflow_run(self.workflow_run_id)
             workflow_path = workflow_run.path
@@ -367,8 +387,12 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
             # Get AI analysis (diagnosis only)
             analysis = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
             
+            print(f"DEBUG: Raw Gemini analysis: {analysis[:200]}...")
+            
             # 🚫 Strip Gemini's Required Actions completely
             analysis = strip_required_actions(analysis)
+            
+            print(f"DEBUG: After stripping: {analysis[:200]}...")
             
             # Compose final message with authoritative OpenWISP QA instructions
             from datetime import datetime
@@ -381,6 +405,8 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
 {self.openwisp_qa_block()}
 
 Analysis based on actual job failures - {timestamp}"""
+            
+            print(f"DEBUG: Final message: {final_message[:300]}...")
             
             # Post intelligent comment
             self.post_comment(final_message)

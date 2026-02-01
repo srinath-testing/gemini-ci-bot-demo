@@ -18,20 +18,33 @@ class CIFailureBot:
         self.workflow_run_id = os.environ.get("WORKFLOW_RUN_ID")
         self.repository_name = os.environ.get("REPOSITORY")
         self.pr_number = os.environ.get("PR_NUMBER")
-        if not all([self.github_token, self.repository_name]):
+        
+        # Initialize with None values if missing - bot will still try to comment
+        self.github = None
+        self.repo = None
+        
+        if self.github_token and self.repository_name:
+            try:
+                self.github = Github(self.github_token)
+                self.repo = self.github.get_repo(self.repository_name)
+            except Exception as e:
+                print(f"Warning: Could not initialize GitHub client: {e}")
+        else:
             missing = []
             if not self.github_token:
                 missing.append("GITHUB_TOKEN")
             if not self.repository_name:
                 missing.append("REPOSITORY")
-            print(f"Missing required environment variables: {', '.join(missing)}")
-            sys.exit(1)
-        self.github = Github(self.github_token)
-        self.repo = self.github.get_repo(self.repository_name)
+            print(f"Warning: Missing environment variables: {', '.join(missing)}")
+        
         if self.gemini_api_key:
-            genai.configure(api_key=self.gemini_api_key)
-            self.model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-            self.model = genai.GenerativeModel(self.model_name)
+            try:
+                genai.configure(api_key=self.gemini_api_key)
+                self.model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+                self.model = genai.GenerativeModel(self.model_name)
+            except Exception as e:
+                print(f"Warning: Could not initialize Gemini: {e}")
+                self.model = None
         else:
             print("Warning: GEMINI_API_KEY not provided, will use fallback responses")
             self.model = None
@@ -314,6 +327,10 @@ The automated analysis is temporarily unavailable. Please check the CI logs abov
         if not self.pr_number or self.pr_number.strip() == "":
             print("No PR number, skipping comment")
             return
+        if not self.github or not self.repo:
+            print("GitHub client not initialized, cannot post comment")
+            return
+            
         marker = "<!-- ci-failure-bot-comment -->"
         message_with_marker = f"{marker}\n🤖 **CI Failure Bot** (AI-powered)\n\n{message}"
         try:

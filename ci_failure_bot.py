@@ -330,18 +330,23 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
 
     def enforce_openwisp_qa(self, text):
         """FINAL enforcement: ensure OpenWISP QA workflow, remove raw linters"""
-        # AGGRESSIVE removal of raw linter sections
-        import re
+        print(f"DEBUG: Original text length: {len(text)}")
+        print(f"DEBUG: Original text contains 'black': {'black' in text.lower()}")
         
-        # Remove entire lines containing raw linters
+        # AGGRESSIVE removal of raw linter sections
         lines = text.split('\n')
         filtered_lines = []
+        removed_lines = 0
         
         for line in lines:
             # Skip lines that contain raw linter commands
             if any(tool in line.lower() for tool in ['black', 'flake8', 'isort']):
+                print(f"DEBUG: Removing line: {line}")
+                removed_lines += 1
                 continue
             filtered_lines.append(line)
+        
+        print(f"DEBUG: Removed {removed_lines} lines containing raw linters")
         
         # Rebuild text without raw linter lines
         clean_text = '\n'.join(filtered_lines)
@@ -354,7 +359,9 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
 - Fix formatting with `openwisp-qa-format`
 - Run `./runtests` locally to verify all tests pass
 """
-        return f"{clean_text.strip()}\n{qa_block}"
+        final_text = f"{clean_text.strip()}\n{qa_block}"
+        print(f"DEBUG: Final text contains 'black': {'black' in final_text.lower()}")
+        return final_text
 
     def post_comment(self, message):
         """Post or update comment on PR"""

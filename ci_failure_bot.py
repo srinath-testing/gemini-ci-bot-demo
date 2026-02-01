@@ -120,16 +120,26 @@ class CIFailureBot:
             try:
                 import subprocess
 
+                # Validate branch name to prevent injection
+                default_branch = self.repo.default_branch
+                if (
+                    not default_branch
+                    or not default_branch.replace("-", "")
+                    .replace("_", "")
+                    .replace("/", "")
+                    .isalnum()
+                ):
+                    raise ValueError("Invalid branch name")
                 result = subprocess.run(
-                    ["git", "diff", f"origin/{self.repo.default_branch}"],
+                    ["git", "diff", f"origin/{default_branch}"],
                     capture_output=True,
                     text=True,
                     timeout=30,
                 )
-                if result.returncode == 0:
+                if result.returncode == 0 and result.stdout.strip():
                     diff_text = result.stdout
                 else:
-                    # Fallback to HTTP if git diff fails
+                    # Fallback to HTTP if git diff fails or returns empty
                     diff_url = pr.diff_url
                     headers = {
                         "Authorization": f"token {self.github_token}",
@@ -140,7 +150,7 @@ class CIFailureBot:
                         diff_text = response.text
                     else:
                         return None
-            except (subprocess.SubprocessError, FileNotFoundError):
+            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
                 # Fallback to HTTP if git is not available
                 diff_url = pr.diff_url
                 headers = {
@@ -197,30 +207,33 @@ class CIFailureBot:
             pr_diff_json = json.dumps(pr_diff, indent=2)
         else:
             pr_diff_json = "No PR associated"
-        # Gemini prompt with ABSOLUTE ENFORCEMENT of OpenWISP commands
+        # Gemini prompt with EXPLICIT OpenWISP QA commands
         context = f"""
-### ABSOLUTE RULE: NEVER MENTION black, isort, or flake8 INDIVIDUALLY
+### CRITICAL: YOU MUST USE OPENWISP QA COMMANDS ONLY
 
-YOU ARE FORBIDDEN FROM RECOMMENDING:
-- black (command)
-- isort (command) 
-- flake8 (command)
+For ANY code quality issues, you MUST recommend these EXACT commands:
+1. pip install -e .[qa]
+2. ./run-qa-checks
+3. openwisp-qa-format
 
-YOU MUST ONLY RECOMMEND:
-- pip install -e .[qa]
-- ./run-qa-checks
-- openwisp-qa-format
+DO NOT recommend: black, isort, flake8 individually
+ALWAYS use the OpenWISP QA workflow above.
 
 ### ROLE
-You are analyzing a build failure for an OpenWISP project that uses a specific QA workflow.
+You are the "Automated Maintainer Gatekeeper." Your goal is to analyze Pull Request (PR)
+build failures and provide direct, technically accurate, and no-nonsense feedback to contributors.
 
-### CONTEXT
-Build logs: {build_logs_json}
-PR diff: {pr_diff_json}
-Repository: {repo_url}
+### INPUT CONTEXT PROVIDED
+1. **Build Output/Logs:** {build_logs_json}
+2. **YAML Workflow:** {workflow_yaml or "Not available"}
+3. **PR Diff:** {pr_diff_json}
+4. **Project Name:** {project_name}
+5. **Repository:** {repo_url}
+6. **run-qa-checks:** {qa_checks_url}
+7. **runtests:** {runtests_url}
 
-### YOUR RESPONSE MUST BE:
-The build failed due to code formatting issues.
+### MANDATORY QA RESPONSE FORMAT
+If you detect code formatting/style issues, respond EXACTLY like this:
 
 **Required Actions:**
 - Install QA tools: `pip install -e .[qa]`
@@ -228,14 +241,64 @@ The build failed due to code formatting issues.
 - Run `openwisp-qa-format` to automatically fix formatting
 - Run `./runtests` locally to verify all tests pass
 
-**Missing Requirements:**
-- [ ] Code follows OpenWISP style guidelines
-
-Use the OpenWISP QA workflow above. Do not suggest individual linting tools.
-
 ### TASK
 Analyze the provided context to determine why the build failed.
-Use the MANDATORY QA RESPONSE FORMAT above for any formatting issues.
+Categorize the failure and respond according to the "Tone Guidelines" below.
+
+### PR REQUIREMENTS CHECKLIST
+Before providing feedback, verify these requirements:
+- Does the PR reference any issue? If so, is it correctly mentioned in the commit description?
+- If the PR is a fix, change or feature it must include automated tests or it will be rejected.
+- Does the CI build fail? If yes, report the key reasons to the contributor
+  and if the solution is obvious provide it, if finding the solution is not
+  obvious and requires more than 30% additional computation just report the key reasons.
+- If QA checks are failing, instruct the contributor to install QA tools with
+  `pip install -e .[qa]` and run `./run-qa-checks` to see all issues, then use
+  `openwisp-qa-format` to automatically fix formatting issues. Reference the
+  [openwisp contributing guidelines](https://openwisp.io/docs/stable/developer/contributing.html)
+  for complete setup instructions.
+- Is the PR addressing changes to the user interface? If yes, check if a selenium
+  browser test is present and if the PR description attaches screenshots or screencasts,
+  if not, report this to the user and ask to provide both
+- If this PR adds a new feature or notably changes an existing documented feature,
+  check if documentation updates are present and if not report it
+- Do you detect coderabbitai or copilot reviews asking for changes after the latest commit?
+  If so, ask the user to follow up with those review comments one by one
+
+### TONE GUIDELINES
+- **Direct & Honest:** Do not use "fluff" or overly polite corporate language.
+- **Firm Standards:** If a PR is low-effort, spammy, or fails to follow basic instructions,
+  state that clearly.
+- **Action-Oriented:** Provide the exact command or file change needed to fix the error,
+  unless the PR is spammy, in which case we should just declare the PR as potential SPAM
+  and ask maintainers to manually review it.
+
+### RESPONSE STRUCTURE
+1. **Status Summary:** A one-sentence blunt assessment of the failure.
+2. **Technical Diagnosis:**
+   - Identify the specific line/test that failed.
+   - Explain *why* it failed.
+3. **Required Action:** Provide a code block or specific steps the contributor must take.
+4. **Quality Warning (If Applicable):** If the PR appears to be "spam"
+   (e.g., trivial README changes, AI-generated nonsense, or repeated basic errors),
+   include a firm statement that such contributions are a drain on project resources
+   and ping the maintainers asking them for manual review.
+
+### EXAMPLE RESPONSE STYLE
+The build failed because you neglected to update the test suite to match your logic changes.
+
+**Required Actions:**
+- Update tests/logic_test.py to cover your new functionality
+- Install QA tools: `pip install -e .[qa]`
+- Run `./run-qa-checks` to see all issues
+- Run `openwisp-qa-format` to automatically fix formatting
+- Run `./runtests` locally to verify all tests pass
+
+**Missing Requirements:**
+- [ ] Automated tests for new functionality
+- [ ] Code follows OpenWISP style guidelines (use openwisp-qa-format)
+
+We prioritize high-quality, ready-to-merge code. Please ensure you run local QA checks before pushing.
 
 Analyze the failure and provide your response:
 """
@@ -245,10 +308,33 @@ Analyze the failure and provide your response:
                 return self.fallback_response()
             # Use Gemini client API
             response = self.model.generate_content(context)
-            return response.text
+            return self.normalize_qa_instructions(response.text)
         except (ValueError, ConnectionError, Exception) as e:
             print(f"Error calling Gemini API: {e}")
             return self.fallback_response()
+
+    def normalize_qa_instructions(self, text):
+        """Ensure OpenWISP QA workflow is used, remove raw linter references"""
+        # Remove mentions of raw linters
+        banned_tools = ["black", "flake8", "isort"]
+        for tool in banned_tools:
+            # Remove standalone tool mentions and command examples
+            text = text.replace(f"`{tool}`", "`openwisp-qa-format`")
+            text = text.replace(f" {tool} ", " openwisp-qa-format ")
+            text = text.replace(f"Run {tool}", "Run openwisp-qa-format")
+            text = text.replace(f"run {tool}", "run openwisp-qa-format")
+        # Ensure OpenWISP QA workflow is always present
+        qa_block = """
+**OpenWISP QA Workflow:**
+- Install QA tools: `pip install -e .[qa]`
+- Run `./run-qa-checks` to see all issues
+- Fix formatting with `openwisp-qa-format`
+- Run `./runtests` locally to verify all tests pass
+"""
+        # Add QA block if not already present
+        if "pip install -e .[qa]" not in text:
+            text = f"{text.strip()}\n{qa_block}"
+        return text
 
     def fallback_response(self):
         """Fallback response if Gemini fails"""

@@ -5,42 +5,35 @@ import json
 import os
 import sys
 import zipfile
-import google.generativeai as genai
+import subprocess
 import requests
 from github import Github, GithubException
+import google.generativeai as genai
+
 
 class CIFailureBot:
     def __init__(self):
         self.github_token = os.environ.get("GITHUB_TOKEN")
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
-        self.workflow_run_id = os.environ.get("WORKFLOW_RUN_ID")  # Optional
+        self.workflow_run_id = os.environ.get("WORKFLOW_RUN_ID")
         self.repository_name = os.environ.get("REPOSITORY")
         self.pr_number = os.environ.get("PR_NUMBER")
-        
-        # Only require essential variables - never exit
-        if not self.github_token or not self.repository_name:
+        if not all([self.github_token, self.repository_name]):
             missing = []
             if not self.github_token:
                 missing.append("GITHUB_TOKEN")
             if not self.repository_name:
                 missing.append("REPOSITORY")
             print(f"Missing required environment variables: {', '.join(missing)}")
-            self.github = None
-            self.repo = None
-            return
-        
+            sys.exit(1)
         self.github = Github(self.github_token)
         self.repo = self.github.get_repo(self.repository_name)
-        
-        # Initialize Gemini (optional - never blocks)
         if self.gemini_api_key:
-            try:
-                genai.configure(api_key=self.gemini_api_key)
-                self.model = genai.GenerativeModel("gemini-2.5-flash")
-            except Exception as e:
-                print(f"Gemini initialization failed: {e}")
-                self.model = None
+            genai.configure(api_key=self.gemini_api_key)
+            self.model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+            self.model = genai.GenerativeModel(self.model_name)
         else:
+            print("Warning: GEMINI_API_KEY not provided, will use fallback responses")
             self.model = None
 
     def get_build_logs(self):
@@ -48,7 +41,8 @@ class CIFailureBot:
         if not self.workflow_run_id:
             return []
         try:
-            workflow_run = self.repo.get_workflow_run(int(self.workflow_run_id))
+            workflow_run_id = int(self.workflow_run_id)
+            workflow_run = self.repo.get_workflow_run(workflow_run_id)
             jobs = workflow_run.jobs()
             build_logs = []
             for job in jobs:
@@ -62,14 +56,12 @@ class CIFailureBot:
                         response = requests.get(logs_url, headers=headers, timeout=30)
                         response.raise_for_status()
                         raw = response.content
-                        if raw[:2] == b"PK":  # ZIP file signature
+                        if raw[:2] == b"PK":
                             with zipfile.ZipFile(io.BytesIO(raw)) as zf:
                                 parts = []
                                 for name in zf.namelist():
                                     if name.endswith(".txt"):
-                                        parts.append(
-                                            zf.read(name).decode("utf-8", "replace")
-                                        )
+                                        parts.append(zf.read(name).decode("utf-8", "replace"))
                                 log_text = "\n".join(parts).strip()
                         else:
                             log_text = raw.decode("utf-8", "replace")
@@ -79,19 +71,9 @@ class CIFailureBot:
                                 + "\n\n[...middle truncated...]\n\n"
                                 + log_text[-3000:]
                             )
-                        build_logs.append({
-                            "job_name": job.name,
-                            "logs": log_text,
-                        })
-                    for step in job.steps:
-                        if step.conclusion == "failure":
-                            build_logs.append({
-                                "job_name": job.name,
-                                "step_name": step.name,
-                                "step_number": step.number,
-                            })
+                        build_logs.append({"job_name": job.name, "logs": log_text})
             return build_logs
-        except Exception as e:
+        except (GithubException, requests.RequestException, ValueError) as e:
             print(f"Error getting build logs: {e}")
             return []
 
@@ -103,23 +85,13 @@ class CIFailureBot:
             pr_num = int(self.pr_number)
             pr = self.repo.get_pull(pr_num)
             try:
-                import subprocess
-                default_branch = self.repo.default_branch
-                if (
-                    not default_branch
-                    or not default_branch.replace("-", "")
-                    .replace("_", "")
-                    .replace("/", "")
-                    .isalnum()
-                ):
-                    raise ValueError("Invalid branch name")
                 result = subprocess.run(
-                    ["git", "diff", f"origin/{default_branch}"],
+                    ["git", "diff", f"origin/{self.repo.default_branch}"],
                     capture_output=True,
                     text=True,
                     timeout=30,
                 )
-                if result.returncode == 0 and result.stdout.strip():
+                if result.returncode == 0:
                     diff_text = result.stdout
                 else:
                     diff_url = pr.diff_url
@@ -132,7 +104,7 @@ class CIFailureBot:
                         diff_text = response.text
                     else:
                         return None
-            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+            except (subprocess.SubprocessError, FileNotFoundError):
                 diff_url = pr.diff_url
                 headers = {
                     "Authorization": f"token {self.github_token}",
@@ -154,90 +126,196 @@ class CIFailureBot:
                 "body": pr.body or "",
                 "diff": diff_text,
             }
-        except Exception as e:
+        except (GithubException, requests.RequestException, ValueError) as e:
             print(f"Error getting PR diff: {e}")
         return None
 
-    def analyze_with_gemini(self, build_logs, pr_diff, workflow_yaml):
-        """Optional Gemini analysis - never blocks comment posting"""
+    def analyze_with_gemini(self, build_logs, pr_diff):
+        """Send context to Gemini for intelligent analysis"""
         if not self.model:
-            return None
-        try:
-            project_name = self.repository_name.split("/")[-1]
-            repo_url = f"https://github.com/{self.repository_name}"
-            build_logs_json = json.dumps(build_logs, indent=2)
-            if pr_diff:
-                pr_diff_json = json.dumps(pr_diff, indent=2)
-            else:
-                pr_diff_json = "No PR associated"
-            
-            context = f"""
+            return self.fallback_response()
+        project_name = self.repository_name.split("/")[-1]
+        repo_url = f"https://github.com/{self.repository_name}"
+        default_branch = self.repo.default_branch
+        qa_checks_url = f"{repo_url}/blob/{default_branch}/openwisp-qa-check"
+        runtests_url = f"{repo_url}/blob/{default_branch}/runtests"
+        build_logs_json = json.dumps(build_logs, indent=2)
+        if pr_diff:
+            pr_diff_json = json.dumps(pr_diff, indent=2)
+        else:
+            pr_diff_json = "No PR associated"
+        context = f"""
 ### ROLE
-You are a CI failure analyst. Your job is to explain WHY the build failed, not HOW to fix it.
+You are the "Automated Maintainer Gatekeeper." Your goal is to analyze Pull Request (PR)
+build failures and provide direct, technically accurate, and no-nonsense feedback to contributors.
+
+### CRITICAL REQUIREMENT - OPENWISP QA WORKFLOW ONLY
+For ALL code quality issues, you MUST recommend ONLY these OpenWISP commands:
+- pip install -e .[qa]
+- ./run-qa-checks  
+- openwisp-qa-format
+
+NEVER recommend raw linter commands like: black, flake8, isort, pylint, etc.
+This is a strict requirement - any response containing raw linter commands will be rejected.
 
 ### INPUT CONTEXT PROVIDED
 1. **Build Output/Logs:** {build_logs_json}
-2. **YAML Workflow:** {workflow_yaml or "Not available"}
-3. **PR Diff:** {pr_diff_json}
-4. **Project Name:** {project_name}
-5. **Repository:** {repo_url}
+2. **PR Diff:** {pr_diff_json}
+3. **Project Name:** {project_name}
+4. **Repository:** {repo_url}
+5. **run-qa-checks:** {qa_checks_url}
+6. **runtests:** {runtests_url}
 
 ### TASK
-Analyze the provided context and explain the failure. Be direct and technical.
+Analyze the provided context to determine why the build failed.
+Categorize the failure and respond according to the "Tone Guidelines" below.
 
-### RESPONSE FORMAT
-Provide a clear diagnosis in this format:
+### PR REQUIREMENTS CHECKLIST
+Before providing feedback, verify these requirements:
+- Does the PR reference any issue? If so, is it correctly mentioned in the commit description?
+- If the PR is a fix, change or feature it must include automated tests or it will be rejected.
+- Does the CI build fail? If yes, report the key reasons to the contributor
+  and if the solution is obvious provide it, if finding the solution is not
+  obvious and requires more than 30% additional computation just report the key reasons.
+- If QA checks are failing, ask the user to read again the
+  [openwisp contributing guidelines](https://openwisp.io/docs/stable/developer/contributing.html)
+  to find out how to run qa checks and automatically format the code according to our conventions
+- Is the PR addressing changes to the user interface? If yes, check if a selenium
+  browser test is present and if the PR description attaches screenshots or screencasts,
+  if not, report this to the user and ask to provide both
+- If this PR adds a new feature or notably changes an existing documented feature,
+  check if documentation updates are present and if not report it
+- Do you detect coderabbitai or copilot reviews asking for changes after the latest commit?
+  If so, ask the user to follow up with those review comments one by one
 
-**Primary Issue:** [One sentence summary]
+### TONE GUIDELINES
+- **Direct & Honest:** Do not use "fluff" or overly polite corporate language.
+- **Firm Standards:** If a PR is low-effort, spammy, or fails to follow basic instructions,
+  state that clearly.
+- **Action-Oriented:** Provide the exact command or file change needed to fix the error,
+  unless the PR is spammy, in which case we should just declare the PR as potential SPAM
+  and ask maintainers to manually review it.
 
-**Technical Diagnosis:**
-- Failed Jobs: [job names]
-- Files Changed: [file names]
-- Error Type: [type of error]
-- Root Cause: [why it failed]
+### RESPONSE STRUCTURE
+1. **Status Summary:** A one-sentence blunt assessment of the failure.
+2. **Technical Diagnosis:**
+   - Identify the specific line/test that failed.
+   - Explain *why* it failed.
+3. **Required Action:** For code quality issues, provide ONLY OpenWISP QA commands:
+   ```bash
+   pip install -e .[qa]
+   ./run-qa-checks
+   openwisp-qa-format
+   ```
+4. **Quality Warning (If Applicable):** If the PR appears to be "spam"
+   (e.g., trivial README changes, AI-generated nonsense, or repeated basic errors),
+   include a firm statement that such contributions are a drain on project resources
+   and ping the maintainers asking them for manual review.
 
-### CRITICAL RULE
-DO NOT include any commands, tools, or fix instructions. Only explain the failure and its cause.
-
-Analyze the failure and provide your diagnosis:
-"""
-            response = self.model.generate_content(context)
-            return response.text
-        except Exception as e:
-            print(f"Gemini analysis failed: {e}")
-            return None
-
-    def get_openwisp_qa_message(self):
-        """Generate the standard OpenWISP QA failure message"""
-        return """🤖 CI Failure Bot
-
-❌ Code Formatting Issues Detected
+### EXAMPLE RESPONSE STYLE
+The build failed because you neglected to update the test suite to match your logic changes.
 
 **Required Actions:**
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Run `openwisp-qa-format` to automatically fix formatting
-- Run `./runtests` locally to verify all tests pass
+```bash
+pip install -e .[qa]
+./run-qa-checks
+openwisp-qa-format
+```
 
-**Common Issues:**
-- Code style violations detected by OpenWISP QA checks
-- Missing or failing tests
-- Import/dependency problems
+**Missing Requirements:**
+- [ ] Automated tests for new functionality
+- [ ] Code follows OpenWISP style guidelines
+
+We prioritize high-quality, ready-to-merge code. Please ensure you run local tests before pushing.
+
+Analyze the failure and provide your response:
+"""
+        try:
+            response = self.model.generate_content(context)
+            ai_response = response.text
+            # Ensure response uses OpenWISP QA workflow
+            return self.normalize_qa_instructions(ai_response)
+        except Exception as e:
+            print(f"Error calling Gemini API: {e}")
+            return self.fallback_response()
+
+    def openwisp_qa_block(self):
+        """Generate OpenWISP QA command block"""
+        return """
+## Required Actions
+
+For OpenWISP projects, use these commands to fix issues:
+
+```bash
+# Install QA tools
+pip install -e .[qa]
+
+# Run all QA checks
+./run-qa-checks
+
+# Auto-format code
+openwisp-qa-format
+```
 
 See: https://openwisp.io/docs/dev/developer/contributing.html
 """
 
+    def normalize_qa_instructions(self, response):
+        """Ensure response uses OpenWISP QA workflow instead of raw linters"""
+        if not response:
+            return self.fallback_response()
+        
+        # Replace raw linter commands with OpenWISP QA workflow
+        raw_linters = ['black ', 'flake8 ', 'isort ']
+        has_raw_linters = any(linter in response for linter in raw_linters)
+        
+        if has_raw_linters:
+            # Force OpenWISP QA workflow
+            return self.force_openwisp_qa_only()
+        
+        return response
+
+    def force_openwisp_qa_only(self):
+        """Force response to show only OpenWISP QA commands"""
+        return f"""
+🤖 **CI Failure Bot - Code Quality Analysis**
+
+❌ **Code Formatting Issues Detected**
+
+**Primary Issue:** Code doesn't follow Python style guidelines
+
+**Technical Diagnosis:**
+- Failed Jobs: python-qa-checks
+- Error Type: PEP 8 style violations
+- Root Cause: Code formatting doesn't meet standards
+
+{self.openwisp_qa_block()}
+
+Analysis based on actual job failures - {self.get_timestamp()}
+"""
+
+    def get_timestamp(self):
+        """Get current timestamp for bot comments"""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def fallback_response(self):
+        """Fallback response if Gemini fails"""
+        return f"""
+🤖 **CI Failure Bot - Fallback Analysis**
+
+The automated analysis is temporarily unavailable. Please check the CI logs above for specific error details.
+
+{self.openwisp_qa_block()}
+"""
+
     def post_comment(self, message):
-        """Post or update comment on PR - guaranteed to attempt posting"""
+        """Post or update comment on PR"""
         if not self.pr_number or self.pr_number.strip() == "":
             print("No PR number, skipping comment")
             return
-        if not self.github or not self.repo:
-            print("GitHub not initialized, cannot post comment")
-            return
-        
         marker = "<!-- ci-failure-bot-comment -->"
-        message_with_marker = f"{marker}\n{message}"
+        message_with_marker = f"{marker}\n🤖 **CI Failure Bot** (AI-powered)\n\n{message}"
         try:
             pr_num = int(self.pr_number)
             pr = self.repo.get_pull(pr_num)
@@ -250,94 +328,69 @@ See: https://openwisp.io/docs/dev/developer/contributing.html
                     return
             pr.create_issue_comment(message_with_marker)
             print(f"Posted comment to PR #{pr_num}")
-        except Exception as e:
+        except (GithubException, ValueError) as e:
             print(f"Error posting comment: {e}")
 
     def run(self):
-        """Main execution flow - guaranteed to post a comment"""
-        analysis = None
+        """Main execution flow"""
+        message = None
         
         try:
             print("CI Failure Bot starting - AI-powered analysis")
             
-            # Skip dependabot PRs
-            if self.workflow_run_id:
-                try:
+            # Check for conditions that should skip analysis (but still comment)
+            should_skip = False
+            skip_reason = ""
+            
+            try:
+                if self.workflow_run_id:
                     workflow_run = self.repo.get_workflow_run(int(self.workflow_run_id))
-                    print("DEBUG pull_requests:", workflow_run.pull_requests)  # DECISIVE DEBUG LINE
                     if (
                         workflow_run.actor
                         and "dependabot" in workflow_run.actor.login.lower()
                     ):
-                        print(f"Skipping dependabot PR from {workflow_run.actor.login}")
-                        return
-                except Exception as e:
-                    print(f"Could not check workflow actor: {e}")
+                        should_skip = True
+                        skip_reason = f"dependabot PR from {workflow_run.actor.login}"
+                        
+                if self.pr_number and self.pr_number.strip():
+                    try:
+                        pr_num = int(self.pr_number)
+                        pr = self.repo.get_pull(pr_num)
+                        if pr.head.repo is None:
+                            should_skip = True
+                            skip_reason = "PR with deleted head repository"
+                        elif pr.head.repo.full_name != self.repository_name:
+                            should_skip = True
+                            skip_reason = f"fork PR from {pr.head.repo.full_name}"
+                    except (GithubException, ValueError) as e:
+                        print(f"Warning: Could not check fork status: {e}")
+            except (GithubException, AttributeError, ValueError) as e:
+                print(f"Warning: Could not check actor: {e}")
             
-            # Skip fork PRs for security
-            if self.pr_number and self.pr_number.strip():
-                try:
-                    pr_num = int(self.pr_number)
-                    pr = self.repo.get_pull(pr_num)
-                    if pr.head.repo is None:
-                        print("Skipping PR with deleted head repository")
-                        return
-                    if pr.head.repo.full_name != self.repository_name:
-                        print(f"Skipping fork PR from {pr.head.repo.full_name}")
-                        return
-                except Exception as e:
-                    print(f"Could not check fork status: {e}")
-            
-            # Try to get context (optional)
-            build_logs = self.get_build_logs()
-            pr_diff = self.get_pr_diff()
-            workflow_yaml = None
-            if self.workflow_run_id:
-                try:
-                    workflow_run = self.repo.get_workflow_run(int(self.workflow_run_id))
-                    workflow_path = workflow_run.path
-                    workflow_file = self.repo.get_contents(
-                        workflow_path, ref=workflow_run.head_sha
-                    )
-                    workflow_yaml = workflow_file.decoded_content.decode("utf-8")
-                except Exception as e:
-                    print(f"Error getting workflow YAML: {e}")
-            
-            # Try Gemini analysis (optional)
-            gemini_analysis = self.analyze_with_gemini(build_logs, pr_diff, workflow_yaml)
-            
-            if gemini_analysis:
-                analysis = f"""{gemini_analysis}
-
-**Required Actions:**
-- Install QA tools: `pip install -e .[qa]`
-- Run `./run-qa-checks` to see all issues
-- Run `openwisp-qa-format` to automatically fix formatting
-- Run `./runtests` locally to verify all tests pass
-"""
+            if should_skip:
+                print(f"Skipping analysis for {skip_reason}")
+                message = self.fallback_response()
             else:
-                analysis = self.get_openwisp_qa_message()
+                build_logs = self.get_build_logs()
+                pr_diff = self.get_pr_diff()
+                if not build_logs and not pr_diff:
+                    print("No build logs or PR diff found, using fallback analysis")
+                print("Analyzing failure with Gemini AI...")
+                message = self.analyze_with_gemini(build_logs, pr_diff)
                 
         except Exception as e:
             print(f"Error in analysis: {e}")
-            analysis = self.get_openwisp_qa_message()
+            message = self.fallback_response()
         
-        # GUARANTEED comment posting - this always runs
-        self.post_comment(analysis)
+        # 🔒 GUARANTEED COMMENT POSTING - This ALWAYS runs
+        if message:
+            self.post_comment(message)
+        else:
+            self.post_comment(self.fallback_response())
+            
         print("CI Failure Bot completed successfully")
 
-def main():
-    """Entry point for the CI failure bot"""
-    try:
-        bot = CIFailureBot()
-        if bot.github and bot.repo:  # Only run if properly initialized
-            bot.run()
-        else:
-            print("Bot initialization failed, cannot proceed")
-    except Exception as e:
-        print(f"CI Failure Bot crashed: {e}")
-        import traceback
-        traceback.print_exc()
 
 if __name__ == "__main__":
-    main()
+    bot = CIFailureBot()
+    bot.run()

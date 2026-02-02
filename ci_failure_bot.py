@@ -231,15 +231,13 @@ The build failed because you neglected to update the test suite to match your lo
 **Required Actions:**
 ```bash
 pip install -e .[qa]
-./run-qa-checks
 openwisp-qa-format
+./run-qa-checks
 ```
 
-**Missing Requirements:**
-- [ ] Automated tests for new functionality
-- [ ] Code follows OpenWISP style guidelines
-
 We prioritize high-quality, ready-to-merge code. Please ensure you run local tests before pushing.
+
+See: https://openwisp.io/docs/stable/developer/contributing.html
 
 Analyze the failure and provide your response:
 """
@@ -257,17 +255,12 @@ Analyze the failure and provide your response:
         return """
 ## Required Actions
 
-For OpenWISP projects, use these commands to fix issues:
+To fix the formatting issues and verify that your code follows OpenWISP standards, run the following commands locally:
 
 ```bash
-# Install QA tools
 pip install -e .[qa]
-
-# Run all QA checks
-./run-qa-checks
-
-# Auto-format code
 openwisp-qa-format
+./run-qa-checks
 ```
 
 See: https://openwisp.io/docs/stable/developer/contributing.html

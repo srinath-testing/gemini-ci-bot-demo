@@ -336,13 +336,16 @@ The automated analysis is temporarily unavailable. Please check the CI logs abov
         try:
             pr_num = int(self.pr_number)
             pr = self.repo.get_pull(pr_num)
-            bot_login = self.github.get_user().login
+            
+            # Check for existing bot comment (no user identity needed)
             existing_comments = pr.get_issue_comments()
             for comment in existing_comments:
-                if comment.user.login == bot_login and marker in comment.body:
+                if marker in comment.body:
                     print("Bot comment already exists, updating it")
                     comment.edit(message_with_marker)
                     return
+                    
+            # Create new comment
             pr.create_issue_comment(message_with_marker)
             print(f"Posted comment to PR #{pr_num}")
         except (GithubException, ValueError) as e:

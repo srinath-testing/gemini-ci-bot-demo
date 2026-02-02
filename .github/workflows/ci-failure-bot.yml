@@ -1,7 +1,9 @@
 name: CI Failure Bot
 
 on:
-  pull_request:
+  workflow_run:
+    workflows: ["Demo CI Failure"]
+    types: [completed]
 
 permissions:
   issues: write
@@ -11,6 +13,7 @@ permissions:
 jobs:
   ci-failure-bot:
     runs-on: ubuntu-latest
+    continue-on-error: true  # Bot job must always succeed
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,9 +23,12 @@ jobs:
         run: |
           pip install requests PyGithub google-generativeai
       - name: Run CI failure bot
+        continue-on-error: true  # Ensure comment posting completes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python ci_failure_bot.py

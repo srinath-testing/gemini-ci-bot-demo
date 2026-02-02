@@ -217,8 +217,8 @@ Before providing feedback, verify these requirements:
 3. **Required Action:** For code quality issues, provide ONLY OpenWISP QA commands:
    ```bash
    pip install -e .[qa]
-   ./run-qa-checks
    openwisp-qa-format
+   ./run-qa-checks
    ```
 4. **Quality Warning (If Applicable):** If the PR appears to be "spam"
    (e.g., trivial README changes, AI-generated nonsense, or repeated basic errors),
@@ -229,13 +229,13 @@ Before providing feedback, verify these requirements:
 The build failed because you neglected to update the test suite to match your logic changes.
 
 **Required Actions:**
+To fix the formatting issues and verify that your code follows OpenWISP standards, run the following commands locally:
+
 ```bash
 pip install -e .[qa]
 openwisp-qa-format
 ./run-qa-checks
 ```
-
-We prioritize high-quality, ready-to-merge code. Please ensure you run local tests before pushing.
 
 See: https://openwisp.io/docs/stable/developer/contributing.html
 

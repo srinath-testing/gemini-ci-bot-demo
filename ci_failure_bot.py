@@ -270,7 +270,7 @@ pip install -e .[qa]
 openwisp-qa-format
 ```
 
-See: https://openwisp.io/docs/dev/developer/contributing.html
+See: https://openwisp.io/docs/stable/developer/contributing.html
 """
 
     def normalize_qa_instructions(self, response):

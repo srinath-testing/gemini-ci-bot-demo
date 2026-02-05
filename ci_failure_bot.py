@@ -52,44 +52,61 @@ class CIFailureBot:
     def get_build_logs(self):
         """Get actual build logs and error output from failed jobs"""
         if not self.workflow_run_id:
+            print("No WORKFLOW_RUN_ID provided")
             return []
         try:
             workflow_run_id = int(self.workflow_run_id)
             workflow_run = self.repo.get_workflow_run(workflow_run_id)
+            print(f"Fetching jobs for workflow run {workflow_run_id}: {workflow_run.name}")
             jobs = workflow_run.jobs()
             build_logs = []
+            job_count = 0
             for job in jobs:
+                job_count += 1
+                print(f"Job {job_count}: {job.name} - conclusion: {job.conclusion}")
                 if job.conclusion == "failure":
+                    # Always add job info with name for classification
+                    job_entry = {"job_name": job.name}
                     logs_url = job.logs_url
                     if logs_url:
-                        headers = {
-                            "Authorization": f"token {self.github_token}",
-                            "Accept": "application/vnd.github.v3+json",
-                        }
-                        response = requests.get(logs_url, headers=headers, timeout=30)
-                        response.raise_for_status()
-                        raw = response.content
-                        if raw[:2] == b"PK":
-                            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                                parts = []
-                                for name in zf.namelist():
-                                    if name.endswith(".txt"):
-                                        parts.append(
-                                            zf.read(name).decode("utf-8", "replace")
-                                        )
-                                log_text = "\n".join(parts).strip()
-                        else:
-                            log_text = raw.decode("utf-8", "replace")
-                        if len(log_text) > 5000:
-                            log_text = (
-                                log_text[:2000]
-                                + "\n\n[...middle truncated...]\n\n"
-                                + log_text[-3000:]
-                            )
-                        build_logs.append({"job_name": job.name, "logs": log_text})
-                    # Add step-level failure info (INSIDE job loop)
+                        try:
+                            headers = {
+                                "Authorization": f"token {self.github_token}",
+                                "Accept": "application/vnd.github.v3+json",
+                            }
+                            response = requests.get(logs_url, headers=headers, timeout=30)
+                            response.raise_for_status()
+                            raw = response.content
+                            if raw[:2] == b"PK":
+                                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                                    parts = []
+                                    for name in zf.namelist():
+                                        if name.endswith(".txt"):
+                                            parts.append(
+                                                zf.read(name).decode("utf-8", "replace")
+                                            )
+                                    log_text = "\n".join(parts).strip()
+                            else:
+                                log_text = raw.decode("utf-8", "replace")
+                            if len(log_text) > 5000:
+                                log_text = (
+                                    log_text[:2000]
+                                    + "\n\n[...middle truncated...]\n\n"
+                                    + log_text[-3000:]
+                                )
+                            job_entry["logs"] = log_text
+                            print(f"  Fetched {len(log_text)} chars of logs")
+                        except (requests.RequestException, zipfile.BadZipFile) as e:
+                            print(f"  Warning: Could not fetch logs: {e}")
+                            job_entry["logs"] = ""
+                    else:
+                        print(f"  No logs_url available")
+                        job_entry["logs"] = ""
+                    build_logs.append(job_entry)
+                    # Add step-level failure info
                     for step in getattr(job, "steps", []):
                         if step.conclusion == "failure":
+                            print(f"  Failed step: {step.name}")
                             build_logs.append(
                                 {
                                     "job_name": job.name,
@@ -97,8 +114,9 @@ class CIFailureBot:
                                     "step_number": step.number,
                                 }
                             )
+            print(f"Total build_logs entries: {len(build_logs)}")
             return build_logs
-        except (GithubException, requests.RequestException, ValueError) as e:
+        except (GithubException, ValueError) as e:
             print(f"Error getting build logs: {e}")
             return []
 

@@ -114,6 +114,12 @@ class CIFailureBot:
                                     "step_number": step.number,
                                 }
                             )
+            # TEMPORARY TEST: Inject misleading logs to test LLM constraint enforcement
+            print("⚠️ INJECTING MISLEADING LOGS FOR TESTING")
+            build_logs.append({
+                "job_name": "lint-style-check",
+                "logs": "pytest failed: test_something FAILED\nAssertionError: assert 1 == 2"
+            })
             print(f"Total build_logs entries: {len(build_logs)}")
             return build_logs
         except (GithubException, ValueError) as e:

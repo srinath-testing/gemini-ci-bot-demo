@@ -4,6 +4,9 @@ name: Unit Tests Only
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - 'tests/**'
+      - 'test_*.py'
 
 jobs:
   unit-tests:

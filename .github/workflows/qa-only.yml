@@ -4,6 +4,9 @@ name: QA Checks Only
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - '**.py'
+      - '!tests/**'
 
 jobs:
   qa-checks:

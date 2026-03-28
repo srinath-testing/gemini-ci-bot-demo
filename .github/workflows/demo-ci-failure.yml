@@ -50,4 +50,4 @@ jobs:
           
       - name: Run tests
         run: |
-          python -m pytest test_math_utils.py -v || true
+          python -m pytest test_math_utils.py -v
